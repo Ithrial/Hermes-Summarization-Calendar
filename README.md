@@ -2,6 +2,8 @@
 
 A standalone Hermes Web Dashboard plugin that adds a Calendar page for browsing daily session and cron activity, generating manual per-session summaries, and optionally creating a daily roll-up from saved summaries.
 
+![Hermes Calendar Plugin](./Hermes%20Calendar%20Plugin.png)
+
 Daily Ledger does not patch Hermes core. It inventories Hermes session and cron stores read-only and writes its own versioned artifacts under the active `HERMES_HOME`.
 
 ## v1.0 behavior
