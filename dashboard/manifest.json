@@ -1,0 +1,14 @@
+{
+  "name": "daily-ledger",
+  "label": "Calendar",
+  "description": "Calendar view of Hermes session activity and cron runs with optional summary model-generated daily recaps.",
+  "icon": "Clock",
+  "version": "1.0.0",
+  "tab": {
+    "path": "/calendar",
+    "position": "after:analytics"
+  },
+  "entry": "dist/index.js",
+  "css": "dist/style.css",
+  "api": "plugin_api.py"
+}
