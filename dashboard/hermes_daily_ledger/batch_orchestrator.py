@@ -21,7 +21,10 @@ from .batch_jobs import (
     start_batch_job,
     update_batch_member,
 )
-from .inventory import build_day_inventory as _real_build_day_inventory
+from .inventory import (
+    build_day_inventory as _real_build_day_inventory,
+    discover_all as _real_discover_all,
+)
 from .session_storage import (
     check_session_staleness as _real_check_session_staleness,
     load_session_summary as _real_load_session_summary,
@@ -29,6 +32,7 @@ from .session_storage import (
 from .summary_jobs import (
     SummaryJobStatus,
     acquire_session_job as _real_acquire_session_job,
+    fail_session_job as _real_fail_session_job,
     load_session_job as _real_load_session_job,
 )
 from .session_orchestrator import generate_session_summary as _real_generate_session_summary
@@ -40,11 +44,13 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 BuildInventoryFn = Callable[..., Any]
+DiscoverAllFn = Callable[..., tuple[list[Any], list[Any]]]
 LoadSummaryFn = Callable[..., tuple[dict[str, Any] | None, dict[str, Any] | None]]
 CheckStalenessFn = Callable[..., bool]
 AcquireJobFn = Callable[..., SummaryJobStatus | None]
 LoadJobFn = Callable[..., SummaryJobStatus | None]
 GenerateSummaryFn = Callable[..., SummaryJobStatus]
+FailSessionJobFn = Callable[[str, str, str, str, Path | None], SummaryJobStatus]
 
 # ---------------------------------------------------------------------------
 # Generic sanitized error messages (never leak internals)
@@ -80,11 +86,13 @@ def _sanitize_error(raw: str | None) -> str:
     sanitized = " ".join(raw.strip().split())
 
     # Check for known leak patterns; if found, use generic fallback
+    # Keep path/traceback/api_key/token markers and explicit system/user message markers.
+    # Do NOT strip standalone "prompt" or "secret" — those are common in legitimate diagnostics.
     leak_patterns = [
         "/home/", "/root/", "/var/", "/etc/", "/tmp/",
         ".hermes/", ".env",
-        "traceback", "api_key", "token:", "secret",
-        "prompt", "system message", "user message",
+        "traceback", "api_key", "token:",
+        "system message", "user message",
         "/path/to/",
     ]
     lower = sanitized.lower()
@@ -104,11 +112,13 @@ def run_batch_summary(
     ledger_root: Path | None = None,
     # Injectable dependencies (defaults = production functions)
     build_inventory: BuildInventoryFn | None = None,
+    discover_all_deps: DiscoverAllFn | None = None,
     load_summary: LoadSummaryFn | None = None,
     check_staleness: CheckStalenessFn | None = None,
     acquire_job: AcquireJobFn | None = None,
     load_job: LoadJobFn | None = None,
     generate_summary: GenerateSummaryFn | None = None,
+    fail_session_job_dep: FailSessionJobFn | None = None,
 ) -> dict[str, Any]:
     """Process a durable batch sequentially through the per-session orchestrator.
 
@@ -146,6 +156,8 @@ def run_batch_summary(
     # Resolve injectable defaults
     if build_inventory is None:
         build_inventory = _real_build_day_inventory
+    if discover_all_deps is None:
+        discover_all_deps = _real_discover_all
     if load_summary is None:
         load_summary = _real_load_session_summary
     if check_staleness is None:
@@ -156,6 +168,8 @@ def run_batch_summary(
         load_job = _real_load_session_job
     if generate_summary is None:
         generate_summary = _real_generate_session_summary
+    if fail_session_job_dep is None:
+        fail_session_job_dep = _real_fail_session_job
 
     # Step 1: Load and start the durable batch
     batch_job = load_batch_job(ledger_root, date, batch_id)
@@ -183,7 +197,8 @@ def run_batch_summary(
 
             # Step 3: Re-evaluate live inventory before every item
             try:
-                inventory = build_inventory(date, None, None)
+                profiles, cron_roots = discover_all_deps()
+                inventory = build_inventory(date, profiles, cron_roots)
             except Exception:
                 logger.exception(
                     "Failed to build inventory for %s during batch %s", date, batch_id
@@ -347,6 +362,14 @@ def run_batch_summary(
                     "Unexpected error generating summary for %s/%s in batch %s",
                     profile, session_id, batch_id,
                 )
+                # Best-effort release the reserved slot via fail_session_job
+                try:
+                    fail_session_job_dep(
+                        date, profile, session_id,
+                        _ERR_GENERATION_FAILED, ledger_root,
+                    )
+                except Exception:
+                    pass
                 generic_err = _ERR_GENERATION_FAILED
                 try:
                     update_batch_member(

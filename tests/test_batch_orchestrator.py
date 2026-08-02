@@ -12,12 +12,16 @@ Covers:
 - vanished session -> failed but continues
 - immutable version_id capture on success
 - returned failed job -> sanitized/generic error
-- raised exception -> generic durable error + continuation
+- raised exception -> generic durable error + continuation + fail_session_job callback
 - completed / all-skip / partial / all-failed derivation
 - outer failure cleanup: no queued/running left
 - exact slot_reserved=True call, no thread creation
-- per-member inventory refresh
+- per-member inventory refresh with discover_all_deps
 - no raw content/error leakage
+- production-signature regression (discover + build per member)
+- fail_session_job callback exactly once on raise, not on normal failed status
+- inventory-build failure mid-batch
+- narrowed _sanitize_error positive/negative tests
 """
 
 from __future__ import annotations
@@ -89,6 +93,11 @@ def _create_batch(root: Path, date: str, bid: str, members: list[dict], **kw) ->
     return batch_jobs.create_batch_job(root, date, bid, members, **kw)
 
 
+def _fake_discover_all() -> tuple[list[Any], list[Any]]:
+    """Return empty profile/cron lists for tests that don't need real discovery."""
+    return [], []
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -136,6 +145,7 @@ class TestBatchOrchestrator:
         result = run_batch_summary(
             date, bid, ledger_root=root,
             build_inventory=build_inventory,
+            discover_all_deps=_fake_discover_all,
             load_summary=lambda *a, **k: (None, None),
             check_staleness=lambda *a, **k: False,
             acquire_job=acquire_job,
@@ -170,6 +180,7 @@ class TestBatchOrchestrator:
         run_batch_summary(
             date, bid, ledger_root=root,
             build_inventory=lambda d, p, c: FakeDayInventory(date=d, sessions=[FakeSession(**members[0])]),
+            discover_all_deps=_fake_discover_all,
             load_summary=lambda *a, **k: (None, None),
             check_staleness=lambda *a, **k: False,
             acquire_job=lambda *a, **k: FakeJobStatus(),
@@ -201,6 +212,7 @@ class TestBatchOrchestrator:
         run_batch_summary(
             date, bid, ledger_root=root,
             build_inventory=lambda d, p, c: FakeDayInventory(date=d, sessions=[FakeSession(**members[0])]),
+            discover_all_deps=_fake_discover_all,
             load_summary=lambda *a, **k: ({"summary": "old"}, {"source_fingerprint": "old-fp"}),
             check_staleness=lambda *a, **k: True,
             acquire_job=lambda *a, **k: FakeJobStatus(),
@@ -228,6 +240,7 @@ class TestBatchOrchestrator:
         run_batch_summary(
             date, bid, ledger_root=root,
             build_inventory=lambda d, p, c: FakeDayInventory(date=d, sessions=[FakeSession(**members[0])]),
+            discover_all_deps=_fake_discover_all,
             load_summary=lambda *a, **k: ({"summary": "ok"}, {"source_fingerprint": "fp-1"}),
             check_staleness=lambda *a, **k: False,
             acquire_job=lambda *a, **k: FakeJobStatus(),
@@ -262,6 +275,7 @@ class TestBatchOrchestrator:
         run_batch_summary(
             date, bid, ledger_root=root,
             build_inventory=lambda d, p, c: FakeDayInventory(date=d, sessions=[FakeSession(**members[0])]),
+            discover_all_deps=_fake_discover_all,
             load_summary=lambda *a, **k: ({"summary": "ok"}, {"source_fingerprint": "fp-1"}),
             check_staleness=lambda *a, **k: False,
             acquire_job=lambda *a, **k: FakeJobStatus(),
@@ -286,6 +300,7 @@ class TestBatchOrchestrator:
         run_batch_summary(
             date, bid, ledger_root=root,
             build_inventory=lambda d, p, c: FakeDayInventory(date=d, sessions=[FakeSession(**members[0])]),
+            discover_all_deps=_fake_discover_all,
             load_job=load_job,
             load_summary=lambda *a, **k: (None, None),
             check_staleness=lambda *a, **k: False,
@@ -312,6 +327,7 @@ class TestBatchOrchestrator:
         run_batch_summary(
             date, bid, ledger_root=root,
             build_inventory=lambda d, p, c: FakeDayInventory(date=d, sessions=[FakeSession(**members[0])]),
+            discover_all_deps=_fake_discover_all,
             load_job=load_job,
             load_summary=lambda *a, **k: (None, None),
             check_staleness=lambda *a, **k: False,
@@ -353,6 +369,7 @@ class TestBatchOrchestrator:
         run_batch_summary(
             date, bid, ledger_root=root,
             build_inventory=lambda d, p, c: FakeDayInventory(date=d, sessions=[FakeSession(**m) for m in members]),
+            discover_all_deps=_fake_discover_all,
             load_job=load_job,
             load_summary=lambda *a, **k: (None, None),
             check_staleness=lambda *a, **k: False,
@@ -399,6 +416,7 @@ class TestBatchOrchestrator:
         run_batch_summary(
             date, bid, ledger_root=root,
             build_inventory=build_inventory,
+            discover_all_deps=_fake_discover_all,
             load_summary=lambda *a, **k: (None, None),
             check_staleness=lambda *a, **k: False,
             acquire_job=lambda *a, **k: FakeJobStatus(),
@@ -431,6 +449,7 @@ class TestBatchOrchestrator:
         run_batch_summary(
             date, bid, ledger_root=root,
             build_inventory=lambda d, p, c: FakeDayInventory(date=d, sessions=[FakeSession(**m) for m in members]),
+            discover_all_deps=_fake_discover_all,
             load_summary=lambda *a, **k: (None, None),
             check_staleness=lambda *a, **k: False,
             acquire_job=lambda *a, **k: FakeJobStatus(),
@@ -460,6 +479,7 @@ class TestBatchOrchestrator:
         run_batch_summary(
             date, bid, ledger_root=root,
             build_inventory=lambda d, p, c: FakeDayInventory(date=d, sessions=[FakeSession(**members[0])]),
+            discover_all_deps=_fake_discover_all,
             load_summary=lambda *a, **k: (None, None),
             check_staleness=lambda *a, **k: False,
             acquire_job=lambda *a, **k: FakeJobStatus(),
@@ -489,6 +509,7 @@ class TestBatchOrchestrator:
         run_batch_summary(
             date, bid, ledger_root=root,
             build_inventory=lambda d, p, c: FakeDayInventory(date=d, sessions=[FakeSession(**members[0])]),
+            discover_all_deps=_fake_discover_all,
             load_summary=lambda *a, **k: (None, None),
             check_staleness=lambda *a, **k: False,
             acquire_job=lambda *a, **k: FakeJobStatus(),
@@ -512,7 +533,7 @@ class TestBatchOrchestrator:
 
         def generate_summary(d, profile, sid, *, slot_reserved=False, **kw):
             if profile == "p0":
-                raise RuntimeError("internal traceback with /secret/path and API_KEY=xxx")
+                raise RuntimeError("internal error with /secret/path and API_KEY=xxx")
             return FakeJobStatus(
                 date=d, status="completed", profile=profile,
                 session_id=sid, version_id="ver-ok",
@@ -521,6 +542,7 @@ class TestBatchOrchestrator:
         run_batch_summary(
             date, bid, ledger_root=root,
             build_inventory=lambda d, p, c: FakeDayInventory(date=d, sessions=[FakeSession(**m) for m in members]),
+            discover_all_deps=_fake_discover_all,
             load_summary=lambda *a, **k: (None, None),
             check_staleness=lambda *a, **k: False,
             acquire_job=lambda *a, **k: FakeJobStatus(),
@@ -554,6 +576,7 @@ class TestBatchOrchestrator:
         result = run_batch_summary(
             date, bid, ledger_root=root,
             build_inventory=lambda d, p, c: FakeDayInventory(date=d, sessions=[FakeSession(**m) for m in members]),
+            discover_all_deps=_fake_discover_all,
             load_summary=lambda *a, **k: (None, None),
             check_staleness=lambda *a, **k: False,
             acquire_job=lambda *a, **k: FakeJobStatus(),
@@ -572,6 +595,7 @@ class TestBatchOrchestrator:
         result = run_batch_summary(
             date, bid, ledger_root=root,
             build_inventory=lambda d, p, c: FakeDayInventory(date=d, sessions=[FakeSession(**m) for m in members]),
+            discover_all_deps=_fake_discover_all,
             load_summary=lambda *a, **k: ({"summary": "ok"}, {"source_fingerprint": "fp-1"}),
             check_staleness=lambda *a, **k: False,
             acquire_job=lambda *a, **k: FakeJobStatus(),
@@ -601,6 +625,7 @@ class TestBatchOrchestrator:
         result = run_batch_summary(
             date, bid, ledger_root=root,
             build_inventory=lambda d, p, c: FakeDayInventory(date=d, sessions=[FakeSession(**m) for m in members]),
+            discover_all_deps=_fake_discover_all,
             load_summary=lambda *a, **k: (None, None),
             check_staleness=lambda *a, **k: False,
             acquire_job=lambda *a, **k: FakeJobStatus(),
@@ -625,6 +650,7 @@ class TestBatchOrchestrator:
         result = run_batch_summary(
             date, bid, ledger_root=root,
             build_inventory=lambda d, p, c: FakeDayInventory(date=d, sessions=[FakeSession(**m) for m in members]),
+            discover_all_deps=_fake_discover_all,
             load_summary=lambda *a, **k: (None, None),
             check_staleness=lambda *a, **k: False,
             acquire_job=lambda *a, **k: FakeJobStatus(),
@@ -657,6 +683,7 @@ class TestBatchOrchestrator:
         run_batch_summary(
             date, bid, ledger_root=root,
             build_inventory=lambda d, p, c: FakeDayInventory(date=d, sessions=[FakeSession(**m) for m in members]),
+            discover_all_deps=_fake_discover_all,
             load_summary=lambda *a, **k: (None, None),
             check_staleness=lambda *a, **k: False,
             acquire_job=lambda *a, **k: FakeJobStatus(),
@@ -694,6 +721,7 @@ class TestBatchOrchestrator:
         run_batch_summary(
             date, bid, ledger_root=root,
             build_inventory=lambda d, p, c: FakeDayInventory(date=d, sessions=[FakeSession(**members[0])]),
+            discover_all_deps=_fake_discover_all,
             load_summary=lambda *a, **k: (None, None),
             check_staleness=lambda *a, **k: False,
             acquire_job=lambda *a, **k: FakeJobStatus(),
@@ -714,6 +742,12 @@ class TestBatchOrchestrator:
         _create_batch(root, date, bid, members)
 
         inv_call_count = 0
+        discover_call_count = 0
+
+        def fake_discover():
+            nonlocal discover_call_count
+            discover_call_count += 1
+            return [], []
 
         def build_inventory(date_s: str, profiles, cron_roots):
             nonlocal inv_call_count
@@ -723,6 +757,7 @@ class TestBatchOrchestrator:
         run_batch_summary(
             date, bid, ledger_root=root,
             build_inventory=build_inventory,
+            discover_all_deps=fake_discover,
             load_summary=lambda *a, **k: (None, None),
             check_staleness=lambda *a, **k: False,
             acquire_job=lambda *a, **k: FakeJobStatus(),
@@ -732,7 +767,8 @@ class TestBatchOrchestrator:
             ),
         )
 
-        assert inv_call_count == 3, "inventory refreshed once per member"
+        assert inv_call_count == 3, "inventory built once per member"
+        assert discover_call_count == 3, "discovery called once per member"
 
     # -- no raw content/error leakage --------------------------------------
 
@@ -750,6 +786,7 @@ class TestBatchOrchestrator:
         run_batch_summary(
             date, bid, ledger_root=root,
             build_inventory=lambda d, p, c: FakeDayInventory(date=d, sessions=[FakeSession(**members[0])]),
+            discover_all_deps=_fake_discover_all,
             load_summary=lambda *a, **k: (None, None),
             check_staleness=lambda *a, **k: False,
             acquire_job=lambda *a, **k: FakeJobStatus(),
@@ -762,3 +799,227 @@ class TestBatchOrchestrator:
         assert "secret" not in err
         assert "/home/sean" not in err
         assert "traceback" not in err
+
+    # =========================================================================
+    # NEW TESTS for B1 fix
+    # =========================================================================
+
+    # -- FIX 1: production-signature regression (discover + build per member)
+
+    def test_production_signature_discover_build_per_member(self, tmp_path: Path) -> None:
+        """Prove that discover_all_deps and build_inventory are called per-member
+        with REAL list arguments (not None), preserving per-member re-evaluation."""
+        from hermes_daily_ledger.batch_orchestrator import run_batch_summary
+
+        root = tmp_path / "ledger"
+        date, bid = "2026-03-10", "prod-sig"
+        members = _make_members(3)
+        _create_batch(root, date, bid, members)
+
+        discover_calls: list[tuple] = []
+        build_calls: list[tuple] = []
+
+        def fake_discover():
+            profiles = ["prof-" + str(i) for i in range(len(members))]
+            cron_roots = ["cron-root"]
+            discover_calls.append((list(profiles), list(cron_roots)))
+            return profiles, cron_roots
+
+        def fake_build(date_s: str, profiles, cron_roots):
+            # Verify called with real lists, not None
+            assert profiles is not None, "profiles must not be None"
+            assert cron_roots is not None, "cron_roots must not be None"
+            assert isinstance(profiles, list), "profiles must be a list"
+            assert isinstance(cron_roots, list), "cron_roots must be a list"
+            build_calls.append((date_s, list(profiles), list(cron_roots)))
+            return FakeDayInventory(date=date_s, sessions=[FakeSession(**m) for m in members])
+
+        run_batch_summary(
+            date, bid, ledger_root=root,
+            build_inventory=fake_build,
+            discover_all_deps=fake_discover,
+            load_summary=lambda *a, **k: (None, None),
+            check_staleness=lambda *a, **k: False,
+            acquire_job=lambda *a, **k: FakeJobStatus(),
+            generate_summary=lambda d, profile, sid, **kw: FakeJobStatus(
+                date=d, status="completed", profile=profile,
+                session_id=sid, version_id="ver-" + profile,
+            ),
+        )
+
+        assert len(discover_calls) == 3, "discover called once per member"
+        assert len(build_calls) == 3, "build called once per member"
+        for dc in discover_calls:
+            assert dc[0] is not None and isinstance(dc[0], list)
+            assert dc[1] is not None and isinstance(dc[1], list)
+
+    # -- FIX 2: fail_session_job callback on raise, not on normal failed
+
+    def test_fail_session_job_called_on_raise_not_on_failed(self, tmp_path: Path) -> None:
+        """After acquire succeeds, if generate_summary raises, fail_session_job_dep
+        is called exactly once with correct identity + generic error.
+        On a normal returned failed status, it is NOT called.
+        Subsequent member still runs."""
+        from hermes_daily_ledger.batch_orchestrator import run_batch_summary
+
+        root = tmp_path / "ledger"
+        date, bid = "2026-03-10", "fail-callback"
+        members = _make_members(2)
+        _create_batch(root, date, bid, members)
+
+        fail_calls: list[tuple] = []
+
+        def fake_fail(date_s, profile, sid, error, lr):
+            fail_calls.append((date_s, profile, sid, error))
+
+        gen_call_count = 0
+
+        def generate_summary(d, profile, sid, *, slot_reserved=False, **kw):
+            nonlocal gen_call_count
+            gen_call_count += 1
+            if profile == "p0":
+                # Raises -> should trigger fail_session_job_dep
+                raise RuntimeError("unexpected crash")
+            elif profile == "p1":
+                # Returns failed status -> should NOT trigger fail_session_job_dep
+                return FakeJobStatus(
+                    date=d, status="failed", profile=profile,
+                    session_id=sid, error="returned failure",
+                )
+
+        run_batch_summary(
+            date, bid, ledger_root=root,
+            build_inventory=lambda d, p, c: FakeDayInventory(date=d, sessions=[FakeSession(**m) for m in members]),
+            discover_all_deps=_fake_discover_all,
+            load_summary=lambda *a, **k: (None, None),
+            check_staleness=lambda *a, **k: False,
+            acquire_job=lambda *a, **k: FakeJobStatus(),
+            generate_summary=generate_summary,
+            fail_session_job_dep=fake_fail,
+        )
+
+        # fail_session_job_dep called exactly once: for the raised exception on p0
+        assert len(fail_calls) == 1, f"expected 1 fail call, got {len(fail_calls)}: {fail_calls}"
+        fc = fail_calls[0]
+        assert fc[0] == date
+        assert fc[1] == "p0"
+        assert fc[2] == "s0"
+        assert "Session summary generation failed" in fc[3]
+
+        # Both members processed (gen called twice)
+        assert gen_call_count == 2
+
+        loaded = batch_jobs.load_batch_job(root, date, bid)
+        assert loaded["members"][0]["status"] == "failed"
+        assert loaded["members"][1]["status"] == "failed"
+
+    # -- FIX 3: inventory-build failure mid-batch
+
+    def test_inventory_build_failure_mid_batch(self, tmp_path: Path) -> None:
+        """First member completes; second build raises; outer cleanup leaves
+        second and third failed with no queued/running members. Terminal aggregate.
+        Durable errors are generic and do not contain exception text."""
+        from hermes_daily_ledger.batch_orchestrator import run_batch_summary
+
+        root = tmp_path / "ledger"
+        date, bid = "2026-03-10", "inv-build-fail"
+        members = _make_members(3)
+        _create_batch(root, date, bid, members)
+
+        build_count = 0
+
+        def fake_build(date_s: str, profiles, cron_roots):
+            nonlocal build_count
+            build_count += 1
+            if build_count == 2:
+                # Second member's inventory build fails
+                raise RuntimeError("disk IO error on /mnt/data/corrupt")
+            return FakeDayInventory(date=date_s, sessions=[FakeSession(**m) for m in members])
+
+        run_batch_summary(
+            date, bid, ledger_root=root,
+            build_inventory=fake_build,
+            discover_all_deps=_fake_discover_all,
+            load_summary=lambda *a, **k: (None, None),
+            check_staleness=lambda *a, **k: False,
+            acquire_job=lambda *a, **k: FakeJobStatus(),
+            generate_summary=lambda d, profile, sid, **kw: FakeJobStatus(
+                date=d, status="completed", profile=profile,
+                session_id=sid, version_id="ver-" + profile,
+            ),
+        )
+
+        loaded = batch_jobs.load_batch_job(root, date, bid)
+
+        # First member completed
+        assert loaded["members"][0]["status"] == "completed"
+
+        # Second and third: failed (not queued/running)
+        for i in range(1, 3):
+            assert loaded["members"][i]["status"] == "failed", \
+                f"member {i} should be failed, got {loaded['members'][i]['status']}"
+
+        # No queued or running members
+        for m in loaded["members"]:
+            assert m["status"] not in ("queued", "running")
+
+        # Terminal aggregate status
+        assert loaded["current"] is None
+        assert loaded["status"] in ("partial", "failed")
+
+        # Durable errors are generic, no raw exception text
+        for i in range(1, 3):
+            err = (loaded["members"][i]["error"] or "").lower()
+            assert "disk io error" not in err
+            assert "/mnt/data/corrupt" not in err
+
+    # -- FIX 4: narrowed _sanitize_error tests
+
+    def test_sanitize_error_strips_leak_patterns(self, tmp_path: Path) -> None:
+        """Positive tests: paths, traceback, api_key, token:, system message, user message
+        still trigger generic fallback."""
+        from hermes_daily_ledger.batch_orchestrator import _sanitize_error
+
+        # Path leak
+        assert _sanitize_error("error at /home/sean/data") == "Session summary generation failed"
+        assert _sanitize_error("/root/.ssh/key") == "Session summary generation failed"
+        assert _sanitize_error("/var/log/crash.log") == "Session summary generation failed"
+        assert _sanitize_error("/etc/shadow exposed") == "Session summary generation failed"
+        assert _sanitize_error("/tmp/scratch") == "Session summary generation failed"
+
+        # .hermes / .env
+        assert _sanitize_error(".hermes/config leak") == "Session summary generation failed"
+        assert _sanitize_error("read .env file") == "Session summary generation failed"
+
+        # traceback, api_key, token:
+        assert _sanitize_error("Traceback (most recent)") == "Session summary generation failed"
+        assert _sanitize_error("api_key=abc123") == "Session summary generation failed"
+        assert _sanitize_error("token: xyz789") == "Session summary generation failed"
+
+        # system message / user message
+        assert _sanitize_error("system message: do evil") == "Session summary generation failed"
+        assert _sanitize_error("user message: leaked") == "Session summary generation failed"
+
+        # /path/to/
+        assert _sanitize_error("/path/to/something") == "Session summary generation failed"
+
+    def test_sanitize_error_allows_prompt_and_secret(self, tmp_path: Path) -> None:
+        """Negative tests: standalone 'prompt' and 'secret' are NOT stripped.
+        Legitimate diagnostic text containing these words passes through."""
+        from hermes_daily_ledger.batch_orchestrator import _sanitize_error
+
+        # "prompt" alone should NOT trigger generic fallback
+        result = _sanitize_error("model prompt exceeded context window")
+        assert "prompt" in result.lower(), f"'prompt' should pass through, got: {result}"
+        assert result != "Session summary generation failed"
+
+        # "secret" alone should NOT trigger generic fallback
+        result2 = _sanitize_error("no secret key configured for this service")
+        assert "secret" in result2.lower(), f"'secret' should pass through, got: {result2}"
+        assert result2 != "Session summary generation failed"
+
+    def test_sanitize_error_empty_and_none(self, tmp_path: Path) -> None:
+        from hermes_daily_ledger.batch_orchestrator import _sanitize_error
+
+        assert _sanitize_error(None) == "Session summary generation failed"
+        assert _sanitize_error("") == "Session summary generation failed"
