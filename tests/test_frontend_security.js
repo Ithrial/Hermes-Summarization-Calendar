@@ -138,6 +138,12 @@ describe('Accessibility and keyboard support', () => {
     assert.ok(SOURCE.includes("'status'"),
       'Loading indicators should use role="status"');
   });
+  it('session title links have a visible keyboard focus style', () => {
+    const cssPath = path.resolve(__dirname, '..', 'dashboard', 'dist', 'style.css');
+    const css = fs.readFileSync(cssPath, 'utf-8');
+    assert.ok(css.includes('.dl-session-title:focus-visible'),
+      'Session title links must have a visible focus style');
+  });
 });
 
 describe('Mobile responsiveness in CSS', () => {

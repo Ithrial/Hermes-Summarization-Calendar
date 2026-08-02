@@ -17,6 +17,7 @@ function loadPlugin(options = {}) {
     '    formatDate: formatDate,',
     '    buildCalendarGrid: buildCalendarGrid,',
     '    sessionKey: sessionKey,',
+    '    sessionChatHref: typeof sessionChatHref === \'function\' ? sessionChatHref : undefined,',
     '    pollArtifact: pollArtifact,',
     '    JOB_POLL_MAX_ATTEMPTS: JOB_POLL_MAX_ATTEMPTS,',
     '    SessionCard: SessionCard,',
@@ -93,6 +94,18 @@ function flattenText(node, out = []) {
   return out;
 }
 
+function findNodes(node, predicate, out = []) {
+  if (node == null || node === false) return out;
+  if (Array.isArray(node)) {
+    for (const item of node) findNodes(item, predicate, out);
+    return out;
+  }
+  if (typeof node !== 'object') return out;
+  if (predicate(node)) out.push(node);
+  if (node.children) findNodes(node.children, predicate, out);
+  return out;
+}
+
 function sessionFixture() {
   return {
     profile: 'default',
@@ -141,6 +154,43 @@ test('frontend session job identity includes date, profile, and session id', () 
   assert.notEqual(first, second);
   assert.match(first, /default/);
   assert.match(first, /20260727_010203_abc/);
+});
+
+test('session chat link is same-origin, profile-scoped, and URL encoded', () => {
+  const { api } = loadPlugin();
+  const href = api.sessionChatHref({
+    profile: 'research/profile',
+    session_id: 'session id?next=/settings',
+  });
+  assert.equal(
+    href,
+    '/chat?resume=session%20id%3Fnext%3D%2Fsettings&profile=research%2Fprofile',
+  );
+  assert.ok(href.startsWith('/chat?'));
+  assert.doesNotMatch(href, /^https?:/);
+});
+
+test('session title renders as the sanitized exact-session link', () => {
+  const { api } = loadPlugin();
+  const session = Object.assign(sessionFixture(), {
+    profile: 'named profile',
+    session_id: 'session/id',
+    title: 'Build\u0000 the thing',
+  });
+  const tree = api.SessionCard({
+    dateStr: '2026-07-27',
+    session,
+    summaryData: null,
+    generating: false,
+    error: '',
+    onGenerate() {},
+    onRollback() {},
+  });
+  const links = findNodes(tree, (node) =>
+    node.type === 'a' && node.props.className === 'dl-session-title');
+  assert.equal(links.length, 1);
+  assert.equal(links[0].props.href, '/chat?resume=session%2Fid&profile=named%20profile');
+  assert.equal(flattenText(links[0]).join(''), 'Build the thing');
 });
 
 test('each session card offers isolated summary generation', () => {

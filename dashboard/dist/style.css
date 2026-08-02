@@ -279,6 +279,21 @@
   font-weight: 600;
   color: var(--dl-fg);
   font-size: 0.9rem;
+  min-width: 0;
+  text-decoration: none;
+  transition: color 0.15s;
+}
+
+.dl-session-title:hover {
+  color: var(--dl-primary);
+  text-decoration: underline;
+  text-underline-offset: 0.16em;
+}
+
+.dl-session-title:focus-visible {
+  border-radius: 2px;
+  outline: 2px solid var(--dl-primary);
+  outline-offset: 2px;
 }
 
 .dl-meta {

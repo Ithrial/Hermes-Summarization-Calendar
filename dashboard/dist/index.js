@@ -143,6 +143,11 @@
       encodeURIComponent(String(session.session_id || ''));
   }
 
+  function sessionChatHref(session) {
+    return '/chat?resume=' + encodeURIComponent(String(session.session_id || '')) +
+      '&profile=' + encodeURIComponent(String(session.profile || ''));
+  }
+
   // Poll any immutable summary artifact with bounded exponential backoff.
   // During regeneration the previous artifact remains visible, so success
   // requires a version different from previousVersion.
@@ -257,7 +262,10 @@
 
     return React.createElement('div', { className: 'dl-session-card' },
       React.createElement('div', { className: 'dl-session-heading' },
-        React.createElement('div', { className: 'dl-session-title' }, title),
+        React.createElement('a', {
+          className: 'dl-session-title',
+          href: sessionChatHref(session),
+        }, title),
         React.createElement(C.Button || 'button', {
           className: 'dl-generate-btn dl-session-generate-btn',
           disabled: !!generating,
