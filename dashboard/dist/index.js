@@ -354,6 +354,17 @@
   }
 
   // -----------------------------------------------------------------------
+  // Calendar batch selection helpers (pure, testable)
+  // -----------------------------------------------------------------------
+
+  // Returns true if batch actions should be disabled (queued or running)
+  function isBatchLocked(batchStatus) {
+    if (!batchStatus || !batchStatus.status) return false;
+    var status = String(batchStatus.status).toLowerCase();
+    return status === 'queued' || status === 'running';
+  }
+
+  // -----------------------------------------------------------------------
   // Components
   // -----------------------------------------------------------------------
 
@@ -383,9 +394,10 @@
     }
 
     var totalVisible = visibleSessions.length;
-    var isBatchQueued = (batchStatus && String(batchStatus.status || '').toLowerCase() === 'queued');
+    var batchLocked = isBatchLocked(batchStatus);
+    var batchDisabled = batchLocked;
     var isBatchRunning = (batchStatus && String(batchStatus.status || '').toLowerCase() === 'running');
-    var batchDisabled = (isBatchQueued || isBatchRunning);
+    var isBatchQueued = (batchStatus && String(batchStatus.status || '').toLowerCase() === 'queued');
 
     var progressText = '';
     if (batchStatus && batchStatus.progress) {
@@ -725,7 +737,10 @@
   }
 
   // Day detail panel with controlled batch selection rendering
-  function DayDetailPanel({ dateStr, dayData, sessionSummaries, rollupData, activeJobs, jobErrors, loadingDay, error, onGenerateSession, onRollbackSession, onGenerateRollup, onRollbackRollup, selectedKeys, onSelectAll, onClear, batchStatus, batchError, regenerateCurrent, onSubmitBatch, onSelectSession, onDeselectSession }) {
+  function DayDetailPanel({ dateStr, dayData, sessionSummaries, rollupData, activeJobs, jobErrors, loadingDay, error, onGenerateSession, onRollbackSession, onGenerateRollup, onRollbackRollup, selectedKeys, onSelectAll, onClear, batchStatus, batchError, regenerateCurrent, onSubmitBatch, onSelectSession, onDeselectSession, onToggleRegenerate }) {
+    var batchLocked = isBatchLocked(batchStatus);
+    var isBatchRunning = (batchStatus && String(batchStatus.status || '').toLowerCase() === 'running');
+    var isBatchQueued = (batchStatus && String(batchStatus.status || '').toLowerCase() === 'queued');
     if (loadingDay) {
       return React.createElement('div', { className: 'dl-detail-panel' },
         React.createElement('div', { className: 'dl-detail-date' }, dateStr),
@@ -764,7 +779,7 @@
         batchError: batchError,
         onSelectAll: onSelectAll,
         onClear: onClear,
-        onToggleRegenerate: function () {},
+        onToggleRegenerate: onToggleRegenerate,
         onSubmit: onSubmitBatch,
       }),
       sessions.length > 0 && React.createElement(React.Fragment, null,
@@ -852,6 +867,10 @@
       loadingMonth: true,
       loadingDay: false,
       error: '',
+      selectedSessions: {},
+      regenerateCurrent: false,
+      batchStatus: null,
+      batchError: '',
     });
 
     var setState = state[1];
@@ -1141,7 +1160,66 @@
     }, [setState, chicagoNow.year, chicagoNow.month, todayStr]);
 
     var handleDayClick = useCallback(function (dateStr) {
-      setState(function (s) { return Object.assign({}, s, { selectedDate: dateStr }); });
+      setState(function (s) {
+        // If date is changing, clear selection/regenerate/batch/error
+        if (s.selectedDate !== dateStr) {
+          return Object.assign({}, s, { selectedDate: dateStr, selectedSessions: {}, regenerateCurrent: false, batchStatus: null, batchError: '' });
+        }
+        return Object.assign({}, s, { selectedDate: dateStr });
+      });
+    }, [setState]);
+
+    // Batch selection helpers
+    var onSelectAllSessions = useCallback(function (dateStr) {
+      setState(function (s) {
+        if (isBatchLocked(s.batchStatus)) return s;
+        if (!s.dayData || !Array.isArray(s.dayData.sessions)) return s;
+        var newSelected = {};
+        for (var i = 0; i < s.dayData.sessions.length; i++) {
+          var session = s.dayData.sessions[i];
+          var key = batchSelectionKey(dateStr, session);
+          newSelected[key] = true;
+        }
+        return Object.assign({}, s, { selectedSessions: newSelected });
+      });
+    }, [setState]);
+
+    var onClearSelection = useCallback(function () {
+      setState(function (s) {
+        if (isBatchLocked(s.batchStatus)) return s;
+        return Object.assign({}, s, { selectedSessions: {} });
+      });
+    }, [setState]);
+
+    var onSelectSession = useCallback(function (dateStr, session) {
+      setState(function (s) {
+        if (isBatchLocked(s.batchStatus)) return s;
+        var key = batchSelectionKey(dateStr, session);
+        var newSelected = Object.assign({}, s.selectedSessions);
+        newSelected[key] = true;
+        return Object.assign({}, s, { selectedSessions: newSelected });
+      });
+    }, [setState]);
+
+    var onDeselectSession = useCallback(function (dateStr, session) {
+      setState(function (s) {
+        if (isBatchLocked(s.batchStatus)) return s;
+        var key = batchSelectionKey(dateStr, session);
+        var newSelected = Object.assign({}, s.selectedSessions);
+        delete newSelected[key];
+        return Object.assign({}, s, { selectedSessions: newSelected });
+      });
+    }, [setState]);
+
+    var onToggleRegenerate = useCallback(function (value) {
+      setState(function (s) {
+        if (isBatchLocked(s.batchStatus)) return s;
+        return Object.assign({}, s, { regenerateCurrent: !!value });
+      });
+    }, [setState]);
+
+    var onSubmitBatch = useCallback(function () {
+      // Safe no-op for C3a internal slice - no API submission yet
     }, [setState]);
 
     // Initial health load. Month data is handled by the navigation effect
@@ -1237,6 +1315,16 @@
         onRollbackSession: rollbackSessionSummary,
         onGenerateRollup: generateRollup,
         onRollbackRollup: rollbackRollup,
+        selectedKeys: stateVal.selectedSessions,
+        onSelectAll: function () { onSelectAllSessions(stateVal.selectedDate); },
+        onClear: function () { onClearSelection(); },
+        batchStatus: stateVal.batchStatus,
+        batchError: stateVal.batchError,
+        regenerateCurrent: stateVal.regenerateCurrent,
+        onSubmitBatch: function () { onSubmitBatch(); },
+        onSelectSession: function (session) { onSelectSession(stateVal.selectedDate, session); },
+        onDeselectSession: function (session) { onDeselectSession(stateVal.selectedDate, session); },
+        onToggleRegenerate: function (value) { onToggleRegenerate(value); },
       })
     );
   }
