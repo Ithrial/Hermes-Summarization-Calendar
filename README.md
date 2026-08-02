@@ -6,18 +6,19 @@ A standalone Hermes Web Dashboard plugin that adds a Calendar page for browsing 
 
 Daily Ledger does not patch Hermes core. It inventories Hermes session and cron stores read-only and writes its own versioned artifacts under the active `HERMES_HOME`.
 
-## v1.0 behavior
+## v1.1 behavior
 
 - Calendar month navigation with activity counts.
 - Daily session inventory across the default Hermes profile and named profiles.
-- Session title, profile, source, model, message count, tool-call count, and daily time range.
+- Session title with sanitized anchor that navigates to `/chat?resume=<session_id>&profile=<profile>`.
+- Profile-scoped session links, restored model metadata, and browser-local auto-titled session visibility filter.
 - Read-only cron execution inventory.
 - Manual per-session summaries; nothing runs automatically.
 - Lossless transcript chunking for larger sessions.
 - Optional daily roll-ups built from current saved session summaries, not raw transcripts.
 - Immutable JSON and Markdown versions with fingerprints, staleness detection, durable job state, and explicit regeneration.
 - Summary routing through Hermes' configured `auxiliary.compression` task. The plugin contains no private provider or model fallback.
-- Fixed `America/Chicago` day boundaries in v1.0.
+- Fixed `America/Chicago` day boundaries.
 
 ## Requirements
 
@@ -27,7 +28,7 @@ Daily Ledger does not patch Hermes core. It inventories Hermes session and cron 
 - Linux for v1.0. Artifact locking uses POSIX `fcntl`; the supplied lifecycle scripts also use Bash and GNU coreutils.
 - Node.js 20 or newer only for development tests; users install the prebuilt frontend bundle.
 
-The v1.0 release was validated on Hermes Agent v0.19.0 (2026.7.20), Python 3.11, and Node.js 23. Newer Hermes releases may change plugin contracts; see the compatibility notes in `SECURITY.md` and run the included validation before publishing or deploying an update.
+|The v1.1 release was validated on Hermes Agent v0.19.0 (2026.7.20), Python 3.11, and Node.js 23. Newer Hermes releases may change plugin contracts; see the compatibility notes in `SECURITY.md` and run the included validation before publishing or deploying an update.
 
 ## Install
 

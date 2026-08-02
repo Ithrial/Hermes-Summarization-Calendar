@@ -247,7 +247,7 @@ describe('Manifest validation', () => {
     assert.strictEqual(manifest.label, 'Calendar');
   });
   it('has correct version', () => {
-    assert.strictEqual(manifest.version, '1.0.0');
+    assert.strictEqual(manifest.version, '1.1.0');
   });
   it('has tab path /calendar', () => {
     assert.strictEqual(manifest.tab.path, '/calendar');

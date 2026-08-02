@@ -50,7 +50,7 @@ class TestHealthEndpoint:
         data = resp.json()
         assert data["status"] == "ok"
         assert data["plugin_name"] == "daily-ledger"
-        assert data["version"] == "0.1.0"
+        assert data["version"] == "1.1.0"
         assert data["profiles_discovered"] == 2
         assert data["readable_sources"] == 2
         assert data["cron_readable"] is True

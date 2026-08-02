@@ -1,4 +1,4 @@
-"""Release packaging contract for the community-shareable v1.0 snapshot."""
+"""Release packaging contract for the community-shareable v1.1 snapshot."""
 from __future__ import annotations
 
 import json
@@ -42,7 +42,7 @@ def test_required_release_files_exist() -> None:
 def test_manifest_declares_v1_semver_and_expected_runtime_files() -> None:
     manifest = json.loads((REPO / "dashboard" / "manifest.json").read_text())
     assert manifest["name"] == "daily-ledger"
-    assert manifest["version"] == "1.0.0"
+    assert manifest["version"] == "1.1.0"
     assert re.fullmatch(r"\d+\.\d+\.\d+", manifest["version"])
     for field in ("entry", "css", "api"):
         assert (REPO / "dashboard" / manifest[field]).is_file(), field
