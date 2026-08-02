@@ -7,7 +7,6 @@ import subprocess
 import sys
 import textwrap
 
-
 REPO = Path(__file__).resolve().parent.parent
 PLUGIN_API = REPO / "dashboard" / "plugin_api.py"
 
@@ -29,9 +28,26 @@ def test_plugin_api_imports_by_file_path_without_dashboard_on_sys_path(tmp_path:
         spec.loader.exec_module(module)
 
         routes = {getattr(route, "path", "") for route in module.router.routes}
-        required = {"/health", "/month", "/day", "/recap"}
+        required = {"/health", "/month", "/day", "/recap", "/session-summary/batch", "/session-summary/batches"}
         missing = required - routes
         assert not missing, f"missing routes: {sorted(missing)}"
+
+        # Verify batch routes exist by checking methods attribute
+        route_methods = {}
+        for route in module.router.routes:
+            path = getattr(route, "path", "")
+            methods = getattr(route, "methods", set())
+            if path:
+                route_methods.setdefault(path, set()).update(methods)
+
+        # POST /session-summary/batch should exist
+        assert "/session-summary/batch" in route_methods, "POST /session-summary/batch missing"
+        assert "POST" in route_methods["/session-summary/batch"], "POST method missing on /session-summary/batch"
+        # GET /session-summary/batch should exist
+        assert "GET" in route_methods["/session-summary/batch"], "GET method missing on /session-summary/batch"
+        # GET /session-summary/batches should exist
+        assert "/session-summary/batches" in route_methods, "GET /session-summary/batches missing"
+        assert "GET" in route_methods["/session-summary/batches"], "GET method missing on /session-summary/batches"
         """
     )
     env = os.environ.copy()

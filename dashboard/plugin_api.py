@@ -20,6 +20,7 @@ import importlib.util
 import logging
 import os
 import re
+import secrets
 import sys
 import threading
 from dataclasses import asdict
@@ -118,8 +119,20 @@ from hermes_daily_ledger.summary_jobs import (
     load_session_job,
     recover_stale_jobs,
 )
+from hermes_daily_ledger.batch_jobs import (
+    create_batch_job,
+    load_batch_job,
+    list_batch_jobs,
+    recover_stale_batch_jobs,
+)
+from hermes_daily_ledger.batch_orchestrator import run_batch_summary
+
+# Keep module reference for helper calls
+import hermes_daily_ledger.batch_jobs as batch_jobs
 
 logger = logging.getLogger(__name__)
+
+import json
 
 router = APIRouter()
 
@@ -144,6 +157,16 @@ class RecapRequestBody(BaseModel):
     force_regenerate: bool = Field(default=False)
 
 
+class BatchMember(BaseModel):
+    profile: str
+    session_id: str
+
+
+class BatchRequestBody(BaseModel):
+    sessions: list[BatchMember]
+    regenerate_current: bool = False
+
+
 # ---------------------------------------------------------------------------
 # Startup hook -- recover stale locks (runs ONCE per process)
 # ---------------------------------------------------------------------------
@@ -161,6 +184,7 @@ def _on_startup() -> None:
         try:
             recovered = recover_stale_locks()
             recovered.extend(recover_stale_jobs())
+            recovered.extend(recover_stale_batch_jobs(get_ledger_root()))
         except Exception as exc:
             # Leave _startup_done false so a later request can retry.
             logger.warning(f"Stale lock recovery failed: {exc}")
@@ -931,3 +955,384 @@ def post_rollup_rollback(
     if restored is None:
         raise HTTPException(status_code=404, detail="Roll-up version not found")
     return {"status": "restored", **_rollup_version_dict(restored)}
+
+
+# ---------------------------------------------------------------------------
+# Batch summary API routes
+# ---------------------------------------------------------------------------
+
+def _build_day_inventory_safe(date_str: str, ledger_root: Path) -> Any | None:
+    """Build day inventory for validation, return None if unavailable."""
+    try:
+        profiles, cron_roots = discover_all()
+        return build_day_inventory(date_str, profiles, cron_roots)
+    except Exception:
+        return None
+
+
+def _run_batch_worker(
+    date: str,
+    batch_id: str,
+    pool_key: str,
+    ledger_root: Path,
+) -> None:
+    """Worker thread for batch summary generation."""
+    try:
+        result = run_batch_summary(date, batch_id, ledger_root=ledger_root)
+        if result.get("status") not in {"completed", "partial"}:
+            logger.error("Batch summary failed for %s: %s", pool_key, result.get("error", "unknown"))
+    except Exception as exc:
+        logger.exception("Unexpected batch worker failure for %s: %s", pool_key, exc)
+        # Best-effort terminalize on unexpected error
+        try:
+            batch_job = load_batch_job(ledger_root, date, batch_id)
+            if batch_job and batch_job["status"] not in {"completed", "partial", "failed"}:
+                now = batch_jobs._now()
+                batch_job["status"] = "failed"
+                batch_job["finished_at"] = now
+                batch_job["current"] = None
+                for member in batch_job["members"]:
+                    if member["status"] in ("queued", "running"):
+                        member["status"] = "failed"
+                        member["error"] = "Batch process terminated unexpectedly (interrupted)"
+                        member["version_id"] = None
+                batch_job["completed"] = sum(1 for m in batch_job["members"] if m["status"] == "completed")
+                batch_job["failed"] = sum(1 for m in batch_job["members"] if m["status"] == "failed")
+                batch_job["skipped"] = sum(1 for m in batch_job["members"] if m["status"] in ("skipped_current", "skipped_running"))
+                batch_file = ledger_root / "batch-jobs" / date / f"{batch_id}.json"
+                batch_jobs._atomic_write_json(batch_file, batch_job)
+        except Exception:
+            pass
+    finally:
+        _remove_worker(pool_key)
+
+
+@router.post("/session-summary/batch", status_code=202)
+def post_batch_summary(
+    date_str: str = Query(..., alias="date", description="Calendar date in YYYY-MM-DD format"),
+    body: BatchRequestBody | None = Body(default=None),
+) -> dict[str, Any]:
+    """Create and queue a batch of session summaries.
+
+    - Validates all members exist for the date
+    - Checks shared _worker_pool capacity under lock
+    - Creates durable batch through accepted storage API
+    - Creates exactly one daemon coordinator thread
+    - Returns 202 with persisted batch object
+    """
+    _validate_date(date_str)
+    _ensure_startup()
+
+    if body is None or not body.sessions:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "missing_sessions",
+                "message": "Request body must include non-empty sessions list",
+            },
+        )
+
+    # Validate member count (1..100)
+    members_list = body.sessions
+    if len(members_list) < 1 or len(members_list) > 100:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "invalid_member_count",
+                "message": "sessions must contain between 1 and 100 members",
+            },
+        )
+
+    # Validate each member has profile and session_id
+    for idx, member in enumerate(members_list):
+        if not isinstance(member.profile, str) or not member.profile.strip():
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "invalid_member",
+                    "message": f"member at index {idx} has invalid or blank profile",
+                },
+            )
+        if not isinstance(member.session_id, str) or not member.session_id.strip():
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "invalid_member",
+                    "message": f"member at index {idx} has invalid or blank session_id",
+                },
+            )
+
+    # Check for duplicate composite identities
+    seen = set()
+    for member in members_list:
+        composite = f"{member.profile}\0{member.session_id}"
+        if composite in seen:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "duplicate_identity",
+                    "message": f"Duplicate composite identity for profile={member.profile}, session_id={member.session_id}",
+                },
+            )
+        seen.add(composite)
+
+    ledger_root = get_ledger_root()
+
+    # Build canonical day inventory once before accepting anything
+    day_inventory = _build_day_inventory_safe(date_str, ledger_root)
+    if day_inventory is None:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "inventory_unavailable",
+                "message": "Failed to build day inventory",
+            },
+        )
+
+    # Validate all identities exist in that date before creating batch
+    for member in members_list:
+        found = False
+        for session in day_inventory.sessions:
+            if session.profile == member.profile and session.session_id == member.session_id:
+                found = True
+                break
+        if not found:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "identity_absent",
+                    "message": f"Identity {member.profile}/{member.session_id} not found for date {date_str}",
+                },
+            )
+
+    # Check capacity BEFORE creating batch
+    with _worker_lock:
+        active_count = len(_worker_pool)
+        if active_count >= _MAX_CONCURRENCY:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "worker_capacity_full",
+                    "message": f"Maximum {_MAX_CONCURRENCY} concurrent workers active. Try again shortly.",
+                },
+            )
+
+    # Generate path-safe unpredictable batch ID
+    batch_id = f"batch-{secrets.token_hex(8)}"
+
+    # Create the members list for batch_jobs.create_batch_job
+    batch_members = [{"profile": m.profile, "session_id": m.session_id} for m in members_list]
+
+    # Create durable batch
+    try:
+        batch_job = create_batch_job(
+            ledger_root,
+            date_str,
+            batch_id,
+            batch_members,
+            regenerate_current=bool(body.regenerate_current),
+        )
+    except (ValueError, OSError) as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "batch_creation_failed",
+                "message": str(exc),
+            },
+        )
+
+    # Now reserve a worker pool slot and create the coordinator thread
+    pool_key = f"batch:{date_str}:{batch_id}"
+
+    with _worker_lock:
+        # Double-check capacity inside the same lock
+        active_count = len(_worker_pool)
+        if active_count >= _MAX_CONCURRENCY:
+            # Rollback batch creation
+            batch_file = ledger_root / "batch-jobs" / date_str / f"{batch_id}.json"
+            try:
+                batch_file.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "worker_capacity_full",
+                    "message": f"Maximum {_MAX_CONCURRENCY} concurrent workers active. Try again shortly.",
+                },
+            )
+        worker = threading.Thread(
+            target=_run_batch_worker,
+            args=(date_str, batch_id, pool_key, ledger_root),
+            daemon=True,
+            name=f"batch-coordinator-{batch_id}",
+        )
+        _worker_pool[pool_key] = worker
+
+    # Try to start the worker
+    try:
+        worker.start()
+    except (RuntimeError, OSError) as exc:
+        # Thread start failed - remove pool entry and terminalize batch
+        with _worker_lock:
+            if _worker_pool.get(pool_key) is worker:
+                _worker_pool.pop(pool_key, None)
+
+        # Best-effort terminalize batch
+        try:
+            batch_file = ledger_root / "batch-jobs" / date_str / f"{batch_id}.json"
+            if batch_file.is_file():
+                data = json.loads(batch_file.read_text())
+                now = batch_jobs._now()
+                data["status"] = "failed"
+                data["finished_at"] = now
+                data["current"] = None
+                for member in data["members"]:
+                    if member["status"] in ("queued", "running"):
+                        member["status"] = "failed"
+                        member["error"] = "Failed to start batch worker"
+                        member["version_id"] = None
+                data["completed"] = sum(1 for m in data["members"] if m["status"] == "completed")
+                data["failed"] = sum(1 for m in data["members"] if m["status"] == "failed")
+                data["skipped"] = sum(1 for m in data["members"] if m["status"] in ("skipped_current", "skipped_running"))
+                batch_jobs._atomic_write_json(batch_file, data)
+        except Exception:
+            pass
+
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "worker_start_failed",
+                "message": f"Failed to start batch worker: {exc}",
+            },
+        )
+
+    # Return the batch job status (without raw content)
+    return {
+        "status": "queued",
+        "batch_id": batch_id,
+        "date": batch_job["date"],
+        "total": batch_job["total"],
+        "members": [
+            {"profile": m["profile"], "session_id": m["session_id"], "status": m["status"]}
+            for m in batch_job["members"]
+        ],
+        "created_at": batch_job["created_at"],
+    }
+
+
+@router.get("/session-summary/batch")
+def get_batch_summary(
+    date_str: str = Query(..., alias="date"),
+    batch_id: str = Query(..., alias="batch_id"),
+) -> dict[str, Any]:
+    """Get exact durable status for a batch, or 404.
+
+    - Validates date and batch_id via storage API safely
+    - Returns exact durable status or 404
+    - Invalid path identity -> 400, never traversal
+    """
+    _validate_date(date_str)
+
+    # Validate batch_id format (alphanumeric with underscores/hyphens only)
+    if not re.match(r"^[a-zA-Z0-9_-]+$", batch_id):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "invalid_batch_id",
+                "message": "batch_id must contain only letters, digits, underscores, or hyphens",
+            },
+        )
+
+    # Prevent path traversal - reject slashes and other dangerous chars
+    if "/" in batch_id or "\\" in batch_id or ".." in batch_id:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "invalid_batch_id",
+                "message": "batch_id contains disallowed characters",
+            },
+        )
+
+    ledger_root = get_ledger_root()
+    batch_job = load_batch_job(ledger_root, date_str, batch_id)
+
+    if batch_job is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": "not_found",
+                "message": f"Batch {batch_id} not found for date {date_str}",
+            },
+        )
+
+    # Return sanitized status (no raw content)
+    return {
+        "status": batch_job["status"],
+        "batch_id": batch_job["batch_id"],
+        "date": batch_job["date"],
+        "regenerate_current": batch_job.get("regenerate_current", False),
+        "total": batch_job["total"],
+        "completed": batch_job.get("completed", 0),
+        "failed": batch_job.get("failed", 0),
+        "skipped": batch_job.get("skipped", 0),
+        "current": batch_job.get("current"),
+        "created_at": batch_job["created_at"],
+        "started_at": batch_job.get("started_at"),
+        "finished_at": batch_job.get("finished_at"),
+        "members": [
+            {
+                "profile": m["profile"],
+                "session_id": m["session_id"],
+                "status": m["status"],
+                "error": m.get("error"),
+                "version_id": m.get("version_id"),
+            }
+            for m in batch_job["members"]
+        ],
+    }
+
+
+@router.get("/session-summary/batches")
+def list_batch_summaries(
+    date_str: str = Query(..., alias="date"),
+    limit: int = Query(default=20, ge=1, le=20),
+) -> dict[str, Any]:
+    """Return object with date and batches list (max 20 newest).
+
+    - Validates date strictly
+    - limit must be bool-false int (not bool itself) in 1..20
+    - Returns at most 20 newest statuses
+    """
+    _validate_date(date_str)
+
+    # Strict limit check - bool cannot arrive through HTTP query
+    if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1 or limit > 20:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "invalid_limit",
+                "message": "limit must be an integer between 1 and 20",
+            },
+        )
+
+    ledger_root = get_ledger_root()
+    batches = list_batch_jobs(ledger_root, date_str, limit=limit)
+
+    return {
+        "date": date_str,
+        "batches": [
+            {
+                "batch_id": b["batch_id"],
+                "status": b["status"],
+                "total": b["total"],
+                "completed": b.get("completed", 0),
+                "failed": b.get("failed", 0),
+                "skipped": b.get("skipped", 0),
+                "created_at": b["created_at"],
+                "started_at": b.get("started_at"),
+                "finished_at": b.get("finished_at"),
+            }
+            for b in batches
+        ],
+    }
