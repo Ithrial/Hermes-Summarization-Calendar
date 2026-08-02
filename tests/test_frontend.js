@@ -32,7 +32,12 @@ function loadPlugin(options = {}) {
     '    summarizeBatchProgress: summarizeBatchProgress,',
     '    batchMemberStatusMap: batchMemberStatusMap,',
     '    newestBatchForDate: newestBatchForDate,',
-    '    pollBatchStatus: pollBatchStatus',
+    '    pollBatchStatus: pollBatchStatus,',
+    '    isAutoTitledSession: isAutoTitledSession,',
+    '    getVisibleSessions: getVisibleSessions,',
+    '    filterSelectedSessionKeys: filterSelectedSessionKeys,',
+    '    loadShowAutoTitled: loadShowAutoTitled,',
+    '    saveShowAutoTitled: saveShowAutoTitled',
     '  };',
     '',
   ].join('\n');
@@ -95,6 +100,7 @@ function loadPlugin(options = {}) {
         captured.component = component;
       },
     },
+    localStorage: options.localStorage,
   };
 
   vm.runInNewContext(instrumented, {
@@ -218,6 +224,68 @@ test('frontend session job identity includes date, profile, and session id', () 
   assert.notEqual(first, second);
   assert.match(first, /default/);
   assert.match(first, /20260727_010203_abc/);
+});
+
+test('auto-titled classifier matches only the anchored fallback title shape', () => {
+  const { api } = loadPlugin();
+  for (const title of [
+    'Session 20260802_134519_7837392a',
+    'Session 20260802_134519_A-b_c9',
+  ]) assert.equal(api.isAutoTitledSession(title), true, title);
+  for (const title of [
+    'Build the thing',
+    'Session 20260802_134519_',
+    'Session 20260802_134519_bad suffix',
+    'prefix Session 20260802_134519_abc',
+    'Session 2026080_134519_abc',
+    'Session 20260802_13451_abc',
+    'Session 20260802_134519_abc ',
+    null,
+  ]) assert.equal(api.isAutoTitledSession(title), false, String(title));
+});
+
+test('auto-titled visibility storage accepts only booleans and fails open', () => {
+  const { api } = loadPlugin();
+  const values = new Map();
+  const storage = {
+    getItem(key) { return values.has(key) ? values.get(key) : null; },
+    setItem(key, value) { values.set(key, value); },
+  };
+  assert.equal(api.loadShowAutoTitled(storage), true);
+  api.saveShowAutoTitled(false, storage);
+  assert.equal(api.loadShowAutoTitled(storage), false);
+  api.saveShowAutoTitled(true, storage);
+  assert.equal(api.loadShowAutoTitled(storage), true);
+  values.set('hermes.daily-ledger.showAutoTitled', 'corrupt');
+  assert.equal(api.loadShowAutoTitled(storage), true);
+  const throwing = {
+    getItem() { throw new Error('unavailable'); },
+    setItem() { throw new Error('unavailable'); },
+  };
+  assert.equal(api.loadShowAutoTitled(throwing), true);
+  assert.doesNotThrow(() => api.saveShowAutoTitled(false, throwing));
+});
+
+test('visible-session helpers preserve order, input, and exact composite selection', () => {
+  const { api } = loadPlugin();
+  const date = '2026-08-02';
+  const sessions = [
+    { profile: 'alpha/profile', session_id: 'same/id', title: 'Session 20260802_134519_auto' },
+    { profile: 'beta', session_id: 'same/id', title: 'Meaningful session' },
+    { profile: 'gamma', session_id: 'three', title: 'Another session' },
+  ];
+  const before = JSON.stringify(sessions);
+  assert.deepEqual(api.getVisibleSessions(sessions, true).map((s) => s.profile), ['alpha/profile', 'beta', 'gamma']);
+  assert.deepEqual(api.getVisibleSessions(sessions, false).map((s) => s.profile), ['beta', 'gamma']);
+  assert.equal(JSON.stringify(sessions), before);
+  const selected = {};
+  for (const session of sessions) selected[api.batchSelectionKey(date, session)] = true;
+  selected.unrelated = true;
+  const retained = api.filterSelectedSessionKeys(date, sessions, selected, false);
+  assert.deepEqual(Object.keys(retained).sort(), [
+    api.batchSelectionKey(date, sessions[1]),
+    api.batchSelectionKey(date, sessions[2]),
+  ].sort());
 });
 
 test('session chat link is same-origin, profile-scoped, and URL encoded', () => {
@@ -1161,6 +1229,50 @@ test('DayDetailPanel renders BatchToolbar when dayData exists', () => {
   assert.equal(toolbar.length, 1);
 });
 
+test('DayDetailPanel hides only auto-titled rows while preserving canonical roll-up coverage', () => {
+  const { api } = loadPlugin();
+  const date = '2026-08-02';
+  const auto = {
+    profile: 'alpha', session_id: 'auto', title: 'Session 20260802_134519_auto',
+    summary_status: { exists: true, stale: false },
+  };
+  const named = {
+    profile: 'beta', session_id: 'named', title: 'Meaningful session',
+    summary_status: { exists: true, stale: false },
+  };
+  const selectedKeys = {
+    [api.batchSelectionKey(date, auto)]: true,
+    [api.batchSelectionKey(date, named)]: true,
+  };
+  const baseProps = {
+    dateStr: date,
+    dayData: { sessions: [auto, named], cron_runs: [] },
+    sessionSummaries: {}, rollupData: null, activeJobs: {}, jobErrors: {},
+    loadingDay: false, error: '', selectedKeys,
+    onGenerateSession() {}, onRollbackSession() {}, onGenerateRollup() {}, onRollbackRollup() {},
+    onSelectAll() {}, onClear() {}, batchStatus: null, batchError: '', regenerateCurrent: false,
+    onSubmitBatch() {}, onSelectSession() {}, onDeselectSession() {}, onToggleRegenerate() {},
+    showAutoTitled: false, onToggleShowAutoTitled() {},
+  };
+  const tree = api.DayDetailPanel(baseProps);
+  const text = flattenText(tree).join(' ');
+  const cards = findNodes(tree, (n) => n.type === 'div' && n.props.className === 'dl-session-card');
+  assert.equal(cards.length, 1);
+  assert.match(flattenText(cards[0]).join(' '), /Meaningful session/);
+  assert.doesNotMatch(text, /Session 20260802_134519_auto/);
+  assert.match(text, /1 shown · 1 auto-titled hidden/);
+  assert.match(text, /Roll-up covers 2 of 2 sessions/);
+  assert.match(text, /1 selected/);
+  const toggle = findNodes(tree, (n) => n.type === 'input' && n.props['aria-label'] === 'Show agent-generated sessions')[0];
+  assert.ok(toggle);
+  assert.equal(toggle.props.checked, false);
+  assert.equal(toggle.props.disabled, false);
+
+  const lockedTree = api.DayDetailPanel(Object.assign({}, baseProps, { batchStatus: { status: 'running' } }));
+  const lockedToggle = findNodes(lockedTree, (n) => n.type === 'input' && n.props['aria-label'] === 'Show agent-generated sessions')[0];
+  assert.equal(lockedToggle.props.disabled, true);
+});
+
 test('DayDetailPanel maps exact composite selection and member status to SessionCard', () => {
   const { api } = loadPlugin();
   const sessions = [
@@ -1350,6 +1462,45 @@ test('Calendar state initializes exact batch UI fields', () => {
   assert.equal(state.regenerateCurrent, false);
   assert.equal(state.batchStatus, null);
   assert.equal(state.batchError, '');
+  assert.equal(state.showAutoTitled, true);
+});
+
+test('Calendar restores the local visibility preference and toggling hide prunes only hidden selections', () => {
+  const values = new Map([['hermes.daily-ledger.showAutoTitled', 'false']]);
+  const storage = {
+    getItem(key) { return values.has(key) ? values.get(key) : null; },
+    setItem(key, value) { values.set(key, value); },
+  };
+  const { api, captured } = setupStatefulCalendar({ localStorage: storage });
+  assert.equal(captured.getState().showAutoTitled, false);
+  const date = captured.getState().selectedDate;
+  const auto = { profile: 'alpha', session_id: 'auto', title: 'Session 20260802_134519_auto' };
+  const named = { profile: 'beta', session_id: 'named', title: 'Meaningful session' };
+  const monthData = { days: [{ date, session_count: 2 }] };
+  setBatchUiState(captured, {
+    dayData: { sessions: [auto, named], cron_runs: [] },
+    monthData,
+    selectedSessions: {
+      [api.batchSelectionKey(date, auto)]: true,
+      [api.batchSelectionKey(date, named)]: true,
+    },
+    showAutoTitled: true,
+  });
+
+  let panel = rawCalendarChild(api, captured, api.DayDetailPanel);
+  panel.props.onToggleShowAutoTitled(false);
+  const hidden = captured.getState();
+  assert.equal(hidden.showAutoTitled, false);
+  assert.deepEqual(Object.keys(hidden.selectedSessions), [api.batchSelectionKey(date, named)]);
+  assert.equal(hidden.dayData.sessions.length, 2);
+  assert.equal(hidden.monthData, monthData);
+  assert.equal(values.get('hermes.daily-ledger.showAutoTitled'), 'false');
+
+  panel = rawCalendarChild(api, captured, api.DayDetailPanel);
+  panel.props.onClear();
+  panel = rawCalendarChild(api, captured, api.DayDetailPanel);
+  panel.props.onSelectAll();
+  assert.deepEqual(Object.keys(captured.getState().selectedSessions), [api.batchSelectionKey(date, named)]);
 });
 
 test('Calendar callbacks select and deselect exact composite session identities', () => {
@@ -1426,6 +1577,7 @@ test('queued and running batches lock every selection mutation', () => {
     panel.props.onSelectAll();
     panel.props.onClear();
     panel.props.onToggleRegenerate(true);
+    panel.props.onToggleShowAutoTitled(false);
     assert.equal(JSON.stringify(captured.getState()), before);
   }
 });
@@ -1586,6 +1738,42 @@ test('Calendar submits one exact batch, polls top-level status, and refreshes ar
   assert.ok(calls.some((call) => call.url.includes('/month?year=2026&month=7')));
 });
 
+test('Calendar batch submission excludes hidden auto-titled sessions defensively', async () => {
+  const calls = [];
+  const { api, captured } = setupStatefulCalendar({
+    fetchJSON(url, options) {
+      calls.push({ url, options });
+      if (options && options.method === 'POST') {
+        return Promise.resolve({ status: 'completed', batch_id: 'visible-only', date: '2026-08-02', total: 1, members: [] });
+      }
+      if (url.includes('/day?')) return Promise.resolve({ sessions: [], cron_runs: [] });
+      if (url.includes('/session-summary/rollup?')) return Promise.resolve({ exists: false });
+      if (url.includes('/month?')) return Promise.resolve({ days: [] });
+      throw new Error('Unexpected request ' + url);
+    },
+  });
+  const date = '2026-08-02';
+  const auto = { profile: 'alpha', session_id: 'auto', title: 'Session 20260802_134519_auto' };
+  const named = { profile: 'beta', session_id: 'named', title: 'Meaningful session' };
+  setBatchUiState(captured, {
+    selectedDate: date,
+    dayData: { sessions: [auto, named], cron_runs: [] },
+    selectedSessions: {
+      [api.batchSelectionKey(date, auto)]: true,
+      [api.batchSelectionKey(date, named)]: true,
+    },
+    showAutoTitled: false,
+  });
+
+  rawCalendarChild(api, captured, api.DayDetailPanel).props.onSubmitBatch();
+  await flushPromises();
+  const post = calls.find((call) => call.options && call.options.method === 'POST');
+  assert.ok(post);
+  assert.deepEqual(JSON.parse(post.options.body).sessions, [
+    { profile: 'beta', session_id: 'named' },
+  ]);
+});
+
 test('Calendar surfaces sanitized batch submission failure and unlocks the toolbar', async () => {
   let posts = 0;
   const { api, captured } = setupStatefulCalendar({
@@ -1695,4 +1883,14 @@ test('batch control stylesheet includes focus, disabled, and mobile states', () 
   assert.match(css, /\.dl-batch-btn:focus-visible/);
   assert.match(css, /\.dl-batch-btn:disabled/);
   assert.match(css, /@media\s*\(max-width:\s*640px\)[\s\S]*\.dl-batch-toolbar/);
+});
+
+test('session visibility control stylesheet includes focus, disabled, and mobile states', () => {
+  const css = fs.readFileSync(path.join(__dirname, '..', 'dashboard', 'dist', 'style.css'), 'utf8');
+  for (const className of [
+    '.dl-auto-titled-control', '.dl-auto-titled-label', '.dl-auto-titled-checkbox', '.dl-auto-titled-count',
+  ]) assert.match(css, new RegExp(className.replace('.', '\\.')));
+  assert.match(css, /\.dl-auto-titled-checkbox:focus-visible/);
+  assert.match(css, /\.dl-auto-titled-checkbox:disabled/);
+  assert.match(css, /@media\s*\(max-width:\s*640px\)[\s\S]*\.dl-auto-titled-control/);
 });

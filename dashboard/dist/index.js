@@ -109,6 +109,62 @@
     return str.substring(0, maxLen) + '\u2026';
   }
 
+  var SHOW_AUTO_TITLED_STORAGE_KEY = 'hermes.daily-ledger.showAutoTitled';
+  var AUTO_TITLED_SESSION_RE = /^Session \d{8}_\d{6}_[A-Za-z0-9_-]+$/;
+
+  function isAutoTitledSession(title) {
+    return typeof title === 'string' && AUTO_TITLED_SESSION_RE.test(title);
+  }
+
+  function getVisibleSessions(sessions, showAutoTitled) {
+    if (!Array.isArray(sessions)) return [];
+    if (showAutoTitled !== false) return sessions.slice();
+    return sessions.filter(function (session) {
+      return !isAutoTitledSession(session && session.title);
+    });
+  }
+
+  function filterSelectedSessionKeys(dateStr, sessions, selectedKeys, showAutoTitled) {
+    var visible = getVisibleSessions(sessions, showAutoTitled);
+    var allowed = {};
+    for (var i = 0; i < visible.length; i++) {
+      allowed[batchSelectionKey(dateStr, visible[i])] = true;
+    }
+    var retained = {};
+    Object.keys(selectedKeys || {}).forEach(function (key) {
+      if (allowed[key]) retained[key] = true;
+    });
+    return retained;
+  }
+
+  function loadShowAutoTitled(storage) {
+    try {
+      if (!storage || typeof storage.getItem !== 'function') return true;
+      var value = storage.getItem(SHOW_AUTO_TITLED_STORAGE_KEY);
+      if (value === 'false') return false;
+      if (value === 'true') return true;
+    } catch (_err) { /* browser storage may be unavailable */ }
+    return true;
+  }
+
+  function saveShowAutoTitled(value, storage) {
+    try {
+      if (storage && typeof storage.setItem === 'function') {
+        storage.setItem(SHOW_AUTO_TITLED_STORAGE_KEY, value ? 'true' : 'false');
+      }
+    } catch (_err) { /* preference persistence must never break the page */ }
+  }
+
+  function loadBrowserShowAutoTitled() {
+    try { return loadShowAutoTitled(window.localStorage); }
+    catch (_err) { return true; }
+  }
+
+  function saveBrowserShowAutoTitled(value) {
+    try { saveShowAutoTitled(value, window.localStorage); }
+    catch (_err) { /* fail open when localStorage property access is blocked */ }
+  }
+
   // -----------------------------------------------------------------------
   // API helpers
   // -----------------------------------------------------------------------
@@ -740,7 +796,7 @@
   }
 
   // Day detail panel with controlled batch selection rendering
-  function DayDetailPanel({ dateStr, dayData, sessionSummaries, rollupData, activeJobs, jobErrors, loadingDay, error, onGenerateSession, onRollbackSession, onGenerateRollup, onRollbackRollup, selectedKeys, onSelectAll, onClear, batchStatus, batchError, regenerateCurrent, onSubmitBatch, onSelectSession, onDeselectSession, onToggleRegenerate }) {
+  function DayDetailPanel({ dateStr, dayData, sessionSummaries, rollupData, activeJobs, jobErrors, loadingDay, error, onGenerateSession, onRollbackSession, onGenerateRollup, onRollbackRollup, selectedKeys, onSelectAll, onClear, batchStatus, batchError, regenerateCurrent, onSubmitBatch, onSelectSession, onDeselectSession, onToggleRegenerate, showAutoTitled, onToggleShowAutoTitled }) {
     var batchLocked = isBatchLocked(batchStatus);
     var isBatchRunning = (batchStatus && String(batchStatus.status || '').toLowerCase() === 'running');
     var isBatchQueued = (batchStatus && String(batchStatus.status || '').toLowerCase() === 'queued');
@@ -759,6 +815,12 @@
 
     var sessions = dayData.sessions || [];
     var cronRuns = dayData.cron_runs || [];
+    var showAllSessions = showAutoTitled !== false;
+    var visibleSessions = getVisibleSessions(sessions, showAllSessions);
+    var hiddenAutoTitledCount = sessions.length - visibleSessions.length;
+    var visibleSelectedKeys = filterSelectedSessionKeys(
+      dateStr, sessions, selectedKeys || {}, showAllSessions
+    );
     var currentSummaryCount = 0;
     for (var i = 0; i < sessions.length; i++) {
       var key = sessionKey(sessions[i], dateStr);
@@ -772,11 +834,29 @@
     return React.createElement('div', { className: 'dl-detail-panel' },
       React.createElement('div', { className: 'dl-detail-date' }, dateStr),
       error && ErrorMessage({ message: error }),
+      React.createElement('div', { className: 'dl-auto-titled-control' },
+        React.createElement('label', { className: 'dl-auto-titled-label' },
+          React.createElement('input', {
+            type: 'checkbox',
+            className: 'dl-auto-titled-checkbox',
+            checked: showAllSessions,
+            disabled: batchLocked,
+            onChange: function (event) {
+              if (onToggleShowAutoTitled) onToggleShowAutoTitled(!!event.target.checked);
+            },
+            'aria-label': 'Show agent-generated sessions',
+          }),
+          'Show agent-generated sessions'
+        ),
+        React.createElement('span', { className: 'dl-auto-titled-count', role: 'status' },
+          visibleSessions.length + ' shown · ' + hiddenAutoTitledCount + ' auto-titled hidden'
+        )
+      ),
       // Render BatchToolbar before session cards whenever dayData exists (including zero sessions)
       React.createElement(BatchToolbar, {
         dateStr: dateStr,
-        sessions: sessions,
-        selectedKeys: selectedKeys || {},
+        sessions: visibleSessions,
+        selectedKeys: visibleSelectedKeys,
         regenerateCurrent: !!regenerateCurrent,
         batchStatus: batchStatus,
         batchError: batchError,
@@ -785,11 +865,11 @@
         onToggleRegenerate: onToggleRegenerate,
         onSubmit: onSubmitBatch,
       }),
-      sessions.length > 0 && React.createElement(React.Fragment, null,
-        React.createElement('div', { className: 'dl-section-title' }, sessions.length + (sessions.length === 1 ? ' Session' : ' Sessions')),
-        sessions.map(function (s) {
+      visibleSessions.length > 0 && React.createElement(React.Fragment, null,
+        React.createElement('div', { className: 'dl-section-title' }, visibleSessions.length + (visibleSessions.length === 1 ? ' Session' : ' Sessions')),
+        visibleSessions.map(function (s) {
           var key = sessionKey(s, dateStr);
-          var isSelected = (selectedKeys && selectedKeys.hasOwnProperty(key));
+          var isSelected = visibleSelectedKeys.hasOwnProperty(key);
           var isCron = !s.session_id; // cron cards have no session_id
           var selectionDisabled = isCron;
           var memberStatus = memberStatusMap[key] || null;
@@ -817,7 +897,9 @@
         React.createElement('div', { className: 'dl-section-title' }, cronRuns.length + (cronRuns.length === 1 ? ' Cron Run' : ' Cron Runs')),
         cronRuns.map(function (c) { return React.createElement(CronCard, { key: c.execution_id || c.job_id, cron: c }); })
       ),
-      sessions.length === 0 && cronRuns.length === 0 && React.createElement(Placeholder, { text: 'No activity recorded for this day.' }),
+      visibleSessions.length === 0 && cronRuns.length === 0 && React.createElement(Placeholder, {
+        text: sessions.length > 0 ? 'All sessions for this day are hidden by the visibility filter.' : 'No activity recorded for this day.'
+      }),
       RollupSection({
         dateStr: dateStr,
         rollupData: rollupData,
@@ -856,6 +938,7 @@
   function CalendarPage() {
     var chicagoNow = getChicagoNow();
     var todayStr = formatDate(chicagoNow.year, chicagoNow.month, chicagoNow.day);
+    var initialShowAutoTitled = loadBrowserShowAutoTitled();
 
     var state = useState({
       viewYear: chicagoNow.year,
@@ -875,6 +958,7 @@
       regenerateCurrent: false,
       batchStatus: null,
       batchError: '',
+      showAutoTitled: initialShowAutoTitled,
     });
 
     var setState = state[1];
@@ -1303,9 +1387,10 @@
       setState(function (s) {
         if (isBatchLocked(s.batchStatus)) return s;
         if (!s.dayData || !Array.isArray(s.dayData.sessions)) return s;
+        var visibleSessions = getVisibleSessions(s.dayData.sessions, s.showAutoTitled);
         var newSelected = {};
-        for (var i = 0; i < s.dayData.sessions.length; i++) {
-          var session = s.dayData.sessions[i];
+        for (var i = 0; i < visibleSessions.length; i++) {
+          var session = visibleSessions[i];
           var key = batchSelectionKey(dateStr, session);
           newSelected[key] = true;
         }
@@ -1323,6 +1408,7 @@
     var onSelectSession = useCallback(function (dateStr, session) {
       setState(function (s) {
         if (isBatchLocked(s.batchStatus)) return s;
+        if (s.showAutoTitled === false && isAutoTitledSession(session && session.title)) return s;
         var key = batchSelectionKey(dateStr, session);
         var newSelected = Object.assign({}, s.selectedSessions);
         newSelected[key] = true;
@@ -1347,11 +1433,28 @@
       });
     }, [setState]);
 
+    var onToggleShowAutoTitled = useCallback(function (value) {
+      var nextValue = !!value;
+      if (isBatchLocked(stateVal.batchStatus)) return;
+      saveBrowserShowAutoTitled(nextValue);
+      setState(function (s) {
+        if (isBatchLocked(s.batchStatus)) return s;
+        var sessions = s.dayData && Array.isArray(s.dayData.sessions) ? s.dayData.sessions : [];
+        var selectedSessions = nextValue
+          ? Object.assign({}, s.selectedSessions)
+          : filterSelectedSessionKeys(s.selectedDate, sessions, s.selectedSessions, false);
+        return Object.assign({}, s, {
+          showAutoTitled: nextValue,
+          selectedSessions: selectedSessions,
+        });
+      });
+    }, [setState, stateVal.batchStatus]);
+
     var onSubmitBatch = useCallback(function () {
       var dateStr = stateVal.selectedDate;
       if (!dateStr || batchSubmitRef.current || isBatchLocked(stateVal.batchStatus)) return;
       var visibleSessions = stateVal.dayData && Array.isArray(stateVal.dayData.sessions)
-        ? stateVal.dayData.sessions : [];
+        ? getVisibleSessions(stateVal.dayData.sessions, stateVal.showAutoTitled) : [];
       var payload = buildBatchRequest(
         dateStr,
         visibleSessions,
@@ -1419,6 +1522,7 @@
       stateVal.selectedSessions,
       stateVal.regenerateCurrent,
       stateVal.batchStatus,
+      stateVal.showAutoTitled,
     ]);
 
     // Initial health load. Month data is handled by the navigation effect
@@ -1524,6 +1628,8 @@
         onSelectSession: function (session) { onSelectSession(stateVal.selectedDate, session); },
         onDeselectSession: function (session) { onDeselectSession(stateVal.selectedDate, session); },
         onToggleRegenerate: function (value) { onToggleRegenerate(value); },
+        showAutoTitled: stateVal.showAutoTitled,
+        onToggleShowAutoTitled: function (value) { onToggleShowAutoTitled(value); },
       })
     );
   }

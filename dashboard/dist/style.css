@@ -258,6 +258,52 @@
   color: var(--dl-fg);
 }
 
+/* --- Session visibility control --- */
+
+.dl-auto-titled-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid var(--dl-border);
+  border-radius: var(--dl-radius);
+  background: color-mix(in srgb, var(--dl-card-bg) 96%, var(--dl-primary));
+}
+
+.dl-auto-titled-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--dl-fg);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.dl-auto-titled-checkbox {
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  accent-color: var(--dl-primary);
+  cursor: pointer;
+}
+
+.dl-auto-titled-checkbox:focus-visible {
+  outline: 2px solid var(--dl-primary);
+  outline-offset: 2px;
+}
+
+.dl-auto-titled-checkbox:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.dl-auto-titled-count {
+  margin-left: auto;
+  color: var(--dl-muted);
+  font-size: 0.76rem;
+}
+
 /* --- Batch summary controls --- */
 
 .dl-batch-toolbar {
@@ -652,6 +698,15 @@
 
   .dl-meta {
     gap: 0.2rem 0.5rem;
+  }
+
+  .dl-auto-titled-control {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .dl-auto-titled-count {
+    margin-left: 0;
   }
 
   .dl-batch-toolbar {
