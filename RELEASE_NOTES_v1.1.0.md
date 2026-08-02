@@ -36,7 +36,7 @@ Generated ledger data is preserved during both upgrade and rollback.
 
 ## Verification
 
-- All v1.0 backend tests pass (348 backend, 106 frontend).
-- Full release gate passes with no external network access.
+- Canonical release gate passed: 458 backend tests and 171 frontend tests.
+- Backend tests ran with external network access blocked.
 - Archive integrity and structure verified.
 - v1.1-to-v1.0 rollback tested with ledger-data preservation.

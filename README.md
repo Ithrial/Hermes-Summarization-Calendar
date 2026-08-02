@@ -25,10 +25,10 @@ Daily Ledger does not patch Hermes core. It inventories Hermes session and cron 
 - Hermes Agent with the native Web Dashboard plugin SDK and backend plugin API loader.
 - A Hermes build that provides `agent.auxiliary_client.call_llm` and a working `auxiliary.compression` route.
 - Python 3.11 or newer in the Dashboard runtime.
-- Linux for v1.0. Artifact locking uses POSIX `fcntl`; the supplied lifecycle scripts also use Bash and GNU coreutils.
+- Linux for v1.1. Artifact locking uses POSIX `fcntl`; the supplied lifecycle scripts also use Bash and GNU coreutils.
 - Node.js 20 or newer only for development tests; users install the prebuilt frontend bundle.
 
-|The v1.1 release was validated on Hermes Agent v0.19.0 (2026.7.20), Python 3.11, and Node.js 23. Newer Hermes releases may change plugin contracts; see the compatibility notes in `SECURITY.md` and run the included validation before publishing or deploying an update.
+The v1.1 release was validated on Hermes Agent v0.19.0 (2026.7.20), Python 3.11, and Node.js 23. Newer Hermes releases may change plugin contracts; see the compatibility notes in `SECURITY.md` and run the included validation before publishing or deploying an update.
 
 ## Install
 
