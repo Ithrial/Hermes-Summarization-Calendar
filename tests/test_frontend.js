@@ -1,6 +1,6 @@
 'use strict';
 
-const assert = require('node:assert/strict');
+const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
@@ -22,7 +22,13 @@ function loadPlugin(options = {}) {
     '    JOB_POLL_MAX_ATTEMPTS: JOB_POLL_MAX_ATTEMPTS,',
     '    SessionCard: SessionCard,',
     '    RollupSection: RollupSection,',
-    '    CalendarPage: CalendarPage',
+    '    CalendarPage: CalendarPage,',
+    '    batchSelectionKey: batchSelectionKey,',
+    '    buildBatchRequest: buildBatchRequest,',
+    '    summarizeBatchProgress: summarizeBatchProgress,',
+    '    batchMemberStatusMap: batchMemberStatusMap,',
+    '    newestBatchForDate: newestBatchForDate,',
+    '    pollBatchStatus: pollBatchStatus',
     '  };',
     '',
   ].join('\n');
@@ -354,4 +360,335 @@ test('active bundle never calls the retired raw whole-day recap API', () => {
 test('polling window accommodates long local inference', () => {
   const { api } = loadPlugin();
   assert.equal(api.JOB_POLL_MAX_ATTEMPTS, 180);
+});
+
+// ---------------------------------------------------------------------
+// Batch helpers tests
+// ---------------------------------------------------------------------
+
+test('batchSelectionKey builds exact composite key with encoded date/profile/session_id', () => {
+  const { api } = loadPlugin();
+  const dateStr = '2026-07-27';
+  const session = {
+    profile: 'default',
+    session_id: 'abc123',
+  };
+  const key = api.batchSelectionKey(dateStr, session);
+  assert.equal(key, '2026-07-27/default/abc123');
+});
+
+test('batchSelectionKey encodes special characters correctly', () => {
+  const { api } = loadPlugin();
+  const dateStr = '2026-07-27';
+  const session = {
+    profile: 'research/profile',
+    session_id: 'session id?next=/settings',
+  };
+  const key = api.batchSelectionKey(dateStr, session);
+  assert.equal(key, '2026-07-27/research%2Fprofile/session%20id%3Fnext%3D%2Fsettings');
+});
+
+test('buildBatchRequest filters sessions by selectedKeys', () => {
+  const { api } = loadPlugin();
+  const dateStr = '2026-07-27';
+  const sessions = [
+    { profile: 'p1', session_id: 's1' },
+    { profile: 'p2', session_id: 's2' },
+    { profile: 'p3', session_id: 's3' },
+  ];
+  const selectedKeys = {
+    '2026-07-27/p1/s1': true,
+    '2026-07-27/p3/s3': true,
+  };
+  const req = api.buildBatchRequest(dateStr, sessions, selectedKeys, false);
+  assert.deepEqual(req.sessions, [
+    { profile: 'p1', session_id: 's1' },
+    { profile: 'p3', session_id: 's3' },
+  ]);
+  assert.equal(req.regenerate_current, false);
+});
+
+test('buildBatchRequest includes selectedKeys only and respects visible order', () => {
+  const { api } = loadPlugin();
+  const dateStr = '2026-07-27';
+  const sessions = [
+    { profile: 'a', session_id: '1' },
+    { profile: 'b', session_id: '2' },
+    { profile: 'c', session_id: '3' },
+  ];
+  const selectedKeys = {
+    '2026-07-27/c/3': true,
+    '2026-07-27/a/1': true,
+  };
+  const req = api.buildBatchRequest(dateStr, sessions, selectedKeys, true);
+  assert.equal(req.regenerate_current, true);
+  assert.ok(req.sessions.length === 2);
+  assert.equal(req.sessions[0].profile, 'a');
+  assert.equal(req.sessions[1].profile, 'c');
+});
+
+test('buildBatchRequest ignores keys not in visible sessions', () => {
+  const { api } = loadPlugin();
+  const dateStr = '2026-07-27';
+  const sessions = [
+    { profile: 'p1', session_id: 's1' },
+  ];
+  const selectedKeys = {
+    '2026-07-27/p1/s1': true,
+    '2026-07-27/pX/sX': true,
+    '2026-07-26/p1/s1': true,
+  };
+  const req = api.buildBatchRequest(dateStr, sessions, selectedKeys, false);
+  assert.equal(req.sessions.length, 1);
+  assert.equal(req.sessions[0].profile, 'p1');
+});
+
+test('summarizeBatchProgress counts all fields correctly', () => {
+  const { api } = loadPlugin();
+  const batch = {
+    members: [
+      { session_id: 's1', profile: 'p1', status: 'completed' },
+      { session_id: 's2', profile: 'p2', status: 'partial' },
+      { session_id: 's3', profile: 'p3', status: 'failed' },
+      { session_id: 's4', profile: 'p4', status: 'skipped_current' },
+      { session_id: 's5', profile: 'p5', status: 'skipped_running' },
+      { session_id: 's6', profile: 'p6', status: 'running' },
+      { session_id: 's7', profile: 'p7', status: 'pending' },
+    ],
+  };
+  const summary = api.summarizeBatchProgress(batch);
+  assert.equal(summary.total, 7);
+  assert.equal(summary.finished, 3); // completed + partial + failed
+  assert.equal(summary.completed, 2); // completed + partial counts
+  assert.equal(summary.failed, 1);
+  assert.equal(summary.skipped, 2);
+  assert.equal(summary.active, 2);
+});
+
+test('summarizeBatchProgress skips malformed members', () => {
+  const { api } = loadPlugin();
+  const batch = {
+    members: [
+      { session_id: 's1', profile: 'p1', status: 'completed' },
+      { session_id: 's2' }, // missing profile
+      { profile: 'p3', status: 'running' }, // missing session_id
+      null,
+      { session_id: 's4', profile: 'p4', status: 'pending' },
+    ],
+  };
+  const summary = api.summarizeBatchProgress(batch);
+  assert.equal(summary.total, 2); // only s1 and s4
+  assert.equal(summary.active, 1);
+});
+
+test('summarizeBatchProgress handles null/empty batch', () => {
+  const { api } = loadPlugin();
+  assert.deepEqual(api.summarizeBatchProgress(null), { total: 0, finished: 0, completed: 0, failed: 0, skipped: 0, active: 0 });
+  assert.deepEqual(api.summarizeBatchProgress({}), { total: 0, finished: 0, completed: 0, failed: 0, skipped: 0, active: 0 });
+  assert.deepEqual(api.summarizeBatchProgress({ members: null }), { total: 0, finished: 0, completed: 0, failed: 0, skipped: 0, active: 0 });
+  assert.deepEqual(api.summarizeBatchProgress({ members: [] }), { total: 0, finished: 0, completed: 0, failed: 0, skipped: 0, active: 0 });
+});
+
+test('batchMemberStatusMap builds status map by exact composite identity', () => {
+  const { api } = loadPlugin();
+  const dateStr = '2026-07-27';
+  const batch = {
+    members: [
+      { session_id: 's1', profile: 'p1', status: 'running' },
+      { session_id: 's2', profile: 'p2', status: 'completed' },
+    ],
+  };
+  const map = api.batchMemberStatusMap(dateStr, batch);
+  assert.ok(map.hasOwnProperty('2026-07-27/p1/s1'));
+  assert.ok(map.hasOwnProperty('2026-07-27/p2/s2'));
+  assert.equal(map['2026-07-27/p1/s1'], 'running');
+  assert.equal(map['2026-07-27/p2/s2'], 'completed');
+});
+
+test('batchMemberStatusMap ignores malformed members safely', () => {
+  const { api } = loadPlugin();
+  const dateStr = '2026-07-27';
+  const batch = {
+    members: [
+      { session_id: 's1', profile: 'p1', status: 'running' },
+      { session_id: 's2' },
+      null,
+    ],
+  };
+  const map = api.batchMemberStatusMap(dateStr, batch);
+  assert.equal(Object.keys(map).length, 1);
+  assert.ok(map.hasOwnProperty('2026-07-27/p1/s1'));
+});
+
+test('newestBatchForDate returns first valid batch for exact date', () => {
+  const { api } = loadPlugin();
+  const response = {
+    batches: [
+      { date: '2026-07-28T00:01:00Z', id: 'b2' },
+      { date: '2026-07-27T23:59:59Z', id: 'b1' },
+      { date: '2026-07-27T12:00:00Z', id: 'b0' },
+      { date: '2026-07-26T00:00:00Z', id: 'b3' },
+    ],
+  };
+  const result = api.newestBatchForDate(response, '2026-07-27');
+  assert.equal(result && result.id, 'b1'); // newest first
+});
+
+test('newestBatchForDate returns null if no batch for date', () => {
+  const { api } = loadPlugin();
+  const response = {
+    batches: [
+      { date: '2026-07-28T00:01:00Z', id: 'b2' },
+      { date: '2026-07-26T00:00:00Z', id: 'b3' },
+    ],
+  };
+  const result = api.newestBatchForDate(response, '2026-07-27');
+  assert.equal(result, null);
+});
+
+test('newestBatchForDate handles malformed batches', () => {
+  const { api } = loadPlugin();
+  const response = {
+    batches: [
+      { date: '2026-07-27T00:00:00Z', id: 'b0' },
+      { id: 'b1' },
+      { date: '2026-07-27T00:00:00Z' },
+      null,
+      { date: '2026-07-26T00:00:00Z', id: 'b2' },
+    ],
+  };
+  const result = api.newestBatchForDate(response, '2026-07-27');
+  assert.equal(result && result.id, 'b0');
+});
+
+test('newestBatchForDate returns null for null/empty response', () => {
+  const { api } = loadPlugin();
+  assert.equal(api.newestBatchForDate(null, '2026-07-27'), null);
+  assert.equal(api.newestBatchForDate({ batches: null }, '2026-07-27'), null);
+  assert.equal(api.newestBatchForDate({ batches: [] }, '2026-07-27'), null);
+});
+
+test('pollBatchStatus cancels and clears timer on return', async () => {
+  let timerCalls = 0;
+  let timerId = null;
+  const { api } = loadPlugin({
+    fetchJSON: () => Promise.resolve({ job_status: { status: 'running' } }),
+    setTimeout(fn, ms) {
+      timerCalls++;
+      timerId = { id: timerCalls, fn: fn, ms: ms };
+      return timerCalls;
+    },
+    clearTimeout(id) {
+      if (timerId && timerId.id === id) {
+        timerId = null;
+      }
+      return undefined;
+    },
+  });
+
+  const onCancel = api.pollBatchStatus('/batch/1', () => {}, () => {}, () => {}, 2, 100);
+  assert.ok(timerId !== null);
+  onCancel();
+  assert.ok(timerId === null);
+  assert.equal(timerCalls, 1);
+});
+
+test('pollBatchStatus stops on terminal status and calls onTerminal', async () => {
+  let scheduledTick = null;
+  let timerCalls = 0;
+  const { api } = loadPlugin({
+    fetchJSON: () => Promise.resolve({ job_status: { status: 'completed' } }),
+    setTimeout(fn, ms) {
+      timerCalls++;
+      scheduledTick = fn;
+      return timerCalls;
+    },
+    clearTimeout() {},
+  });
+
+  const results = [];
+  const onCancel = api.pollBatchStatus('/batch/1', () => {}, (data) => results.push(data), () => {}, 5, 100);
+  scheduledTick();
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.equal(results.length, 1);
+  assert.ok(results[0].job_status.status === 'completed');
+  assert.equal(timerCalls, 1);
+  onCancel();
+});
+
+test('pollBatchStatus retries fetch errors until max then calls onError', async () => {
+  let scheduledTick = null;
+  let timerCalls = 0;
+  const { api } = loadPlugin({
+    fetchJSON: () => Promise.reject(new Error('network fail')),
+    setTimeout(fn, ms) {
+      timerCalls++;
+      scheduledTick = fn;
+      return timerCalls;
+    },
+    clearTimeout() {},
+  });
+
+  const errors = [];
+  const onCancel = api.pollBatchStatus('/batch/1', () => {}, () => {}, (msg) => errors.push(msg), 3, 100);
+  for (let i = 0; i < 3; i++) {
+    scheduledTick();
+    await Promise.resolve();
+    await Promise.resolve();
+  }
+
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /Batch polling failed/);
+  assert.equal(timerCalls, 3);
+  onCancel();
+});
+
+test('pollBatchStatus respects cancellation mid-flight', async () => {
+  let tickCount = 0;
+  let scheduledTick = null;
+  const { api } = loadPlugin({
+    fetchJSON: () => {
+      tickCount++;
+      return Promise.resolve({ job_status: { status: 'running' } });
+    },
+    setTimeout(fn, ms) {
+      scheduledTick = fn;
+      return tickCount;
+    },
+    clearTimeout() {},
+  });
+
+  const onCancel = api.pollBatchStatus('/batch/1', () => {}, () => {}, () => {}, 5, 100);
+  scheduledTick();
+  onCancel();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(tickCount, 1); // only the first tick ran
+  onCancel(); // safe to call again
+});
+
+test('pollBatchStatus doubles delay capped at 15000ms', async () => {
+  let delays = [];
+  let scheduledTick = null;
+  const { api } = loadPlugin({
+    fetchJSON: () => Promise.resolve({ job_status: { status: 'running' } }),
+    setTimeout(fn, ms) {
+      delays.push(ms);
+      scheduledTick = fn;
+      return delays.length;
+    },
+    clearTimeout() {},
+  });
+
+  api.pollBatchStatus('/batch/1', () => {}, () => {}, () => {}, 10, 100);
+  for (let i = 0; i < 10; i++) {
+    scheduledTick();
+    await Promise.resolve();
+    await Promise.resolve();
+  }
+
+  // 100 -> 200 -> 400 -> 800 -> 1600 -> 3200 -> 6400 -> 12800 -> 15000 -> 15000
+  assert.deepEqual(delays, [100, 200, 400, 800, 1600, 3200, 6400, 12800, 15000, 15000]);
 });

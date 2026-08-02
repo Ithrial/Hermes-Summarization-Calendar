@@ -212,6 +212,148 @@
   }
 
   // -----------------------------------------------------------------------
+  // Batch helpers (pure, testable)
+  // -----------------------------------------------------------------------
+
+  function batchSelectionKey(dateStr, session) {
+    return encodeURIComponent(String(dateStr || '')) + '/' +
+      encodeURIComponent(String(session.profile || '')) + '/' +
+      encodeURIComponent(String(session.session_id || ''));
+  }
+
+  function buildBatchRequest(dateStr, sessions, selectedKeys, regenerateCurrent) {
+    var resultSessions = [];
+    for (var i = 0; i < sessions.length; i++) {
+      var s = sessions[i];
+      var key = batchSelectionKey(dateStr, s);
+      if (selectedKeys.hasOwnProperty(key)) {
+        resultSessions.push({
+          profile: s.profile,
+          session_id: s.session_id
+        });
+      }
+    }
+    return {
+      sessions: resultSessions,
+      regenerate_current: !!regenerateCurrent
+    };
+  }
+
+  function summarizeBatchProgress(batch) {
+    var total = 0, finished = 0, completed = 0, failed = 0, skipped = 0, active = 0;
+    if (!batch || !Array.isArray(batch.members)) {
+      return { total: 0, finished: 0, completed: 0, failed: 0, skipped: 0, active: 0 };
+    }
+    for (var i = 0; i < batch.members.length; i++) {
+      var m = batch.members[i];
+      if (!m || !m.session_id || !m.profile) {
+        continue; // skip malformed
+      }
+      total++;
+      var status = (m.status || '').toLowerCase();
+      if (status === 'completed' || status === 'partial' || status === 'failed') {
+        finished++;
+        if (status === 'completed') completed++;
+        else if (status === 'failed') failed++;
+        else if (status === 'partial') completed++; // partial counts as finished with success
+      } else if (status === 'skipped_current' || status === 'skipped_running') {
+        skipped++;
+      } else {
+        active++;
+      }
+    }
+    return { total: total, finished: finished, completed: completed, failed: failed, skipped: skipped, active: active };
+  }
+
+  function batchMemberStatusMap(dateStr, batch) {
+    var map = {};
+    if (!batch || !Array.isArray(batch.members)) {
+      return map;
+    }
+    for (var i = 0; i < batch.members.length; i++) {
+      var m = batch.members[i];
+      if (!m || !m.session_id || !m.profile) {
+        continue; // skip malformed
+      }
+      var key = batchSelectionKey(dateStr, m);
+      map[key] = m.status || 'unknown';
+    }
+    return map;
+  }
+
+  function newestBatchForDate(response, dateStr) {
+    if (!response || !Array.isArray(response.batches)) {
+      return null;
+    }
+    for (var i = 0; i < response.batches.length; i++) {
+      var b = response.batches[i];
+      if (!b || !b.date) {
+        continue;
+      }
+      var batchDate = String(b.date).split('T')[0]; // strip time portion if present
+      if (batchDate === dateStr) {
+        return b;
+      }
+    }
+    return null;
+  }
+
+  function pollBatchStatus(path, onUpdate, onTerminal, onError, maxAttempts, intervalMs) {
+    var attempt = 0;
+    var currentDelay = intervalMs || 2000;
+    var max = maxAttempts || JOB_POLL_MAX_ATTEMPTS;
+    var cancelled = false;
+    var timerId = null;
+
+    function scheduleTick() {
+      if (cancelled) return;
+      currentDelay = Math.min(currentDelay * 2, 15000);
+      timerId = setTimeout(doTick, currentDelay);
+    }
+
+    function doTick() {
+      timerId = null;
+      if (cancelled) return;
+      attempt++;
+
+      apiGet(path)
+        .then(function (data) {
+          if (cancelled) return;
+          if (data && onUpdate) onUpdate(data);
+          var job = data && data.job_status;
+          var status = job ? (job.status || '').toLowerCase() : '';
+          if (status === 'completed' || status === 'partial' || status === 'failed') {
+            if (onTerminal) onTerminal(data);
+            return;
+          }
+          if (attempt >= max) {
+            if (onError) onError('Batch polling timed out after ' + max + ' attempts');
+          } else {
+            scheduleTick();
+          }
+        })
+        .catch(function (err) {
+          if (cancelled) return;
+          if (attempt >= max) {
+            if (onError) onError('Batch polling failed: ' + sanitize(String(err.message || err)));
+          } else {
+            scheduleTick();
+          }
+        });
+    }
+
+    timerId = setTimeout(doTick, currentDelay);
+
+    return function cancel() {
+      cancelled = true;
+      if (timerId !== null) {
+        clearTimeout(timerId);
+        timerId = null;
+      }
+    };
+  }
+
+  // -----------------------------------------------------------------------
   // Components
   // -----------------------------------------------------------------------
 
