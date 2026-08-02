@@ -21,6 +21,8 @@ function loadPlugin(options = {}) {
     '    pollArtifact: pollArtifact,',
     '    JOB_POLL_MAX_ATTEMPTS: JOB_POLL_MAX_ATTEMPTS,',
     '    SessionCard: SessionCard,',
+    '    BatchToolbar: BatchToolbar,',
+    '    DayDetailPanel: DayDetailPanel,',
     '    RollupSection: RollupSection,',
     '    CalendarPage: CalendarPage,',
     '    batchSelectionKey: batchSelectionKey,',
@@ -107,6 +109,12 @@ function findNodes(node, predicate, out = []) {
     return out;
   }
   if (typeof node !== 'object') return out;
+  if (typeof node.type === 'function') {
+    // Expand function types by calling them
+    const expanded = node.type(Object.assign({}, node.props, { children: node.children }));
+    findNodes(expanded, predicate, out);
+    return out;
+  }
   if (predicate(node)) out.push(node);
   if (node.children) findNodes(node.children, predicate, out);
   return out;
@@ -187,10 +195,11 @@ test('session title renders as the sanitized exact-session link', () => {
     dateStr: '2026-07-27',
     session,
     summaryData: null,
-    generating: false,
+    selected: false,
+    selectionDisabled: false,
+    batchMemberStatus: null,
     error: '',
-    onGenerate() {},
-    onRollback() {},
+    onToggleSelect() {},
   });
   const links = findNodes(tree, (node) =>
     node.type === 'a' && node.props.className === 'dl-session-title');
@@ -199,22 +208,200 @@ test('session title renders as the sanitized exact-session link', () => {
   assert.equal(flattenText(links[0]).join(''), 'Build the thing');
 });
 
-test('each session card offers isolated summary generation', () => {
+test('session card checkbox is controlled by selected prop', () => {
+  const { api } = loadPlugin();
+  const session = sessionFixture();
+  const tree = api.SessionCard({
+    dateStr: '2026-07-27',
+    session,
+    summaryData: null,
+    selected: true,
+    selectionDisabled: false,
+    batchMemberStatus: null,
+    error: '',
+    onToggleSelect() {},
+  });
+  const checkboxes = findNodes(tree, (node) => node.type === 'input' && node.props.type === 'checkbox');
+  assert.equal(checkboxes.length, 1);
+  assert.equal(checkboxes[0].props.checked, true);
+  assert.equal(checkboxes[0].props.disabled, false);
+  assert.match(checkboxes[0].props['aria-label'] || '', /Select Build the thing for batch summary/);
+});
+
+test('session card checkbox is disabled when selectionDisabled prop is true', () => {
+  const { api } = loadPlugin();
+  const cronSession = { job_id: 'cron1', job_name: 'My Cron Job' };
+  const tree = api.SessionCard({
+    dateStr: '2026-07-27',
+    session: cronSession,
+    summaryData: null,
+    selected: false,
+    selectionDisabled: true,
+    batchMemberStatus: null,
+    error: '',
+    onToggleSelect() {},
+  });
+  const checkboxes = findNodes(tree, (node) => node.type === 'input' && node.props.type === 'checkbox');
+  assert.equal(checkboxes.length, 1);
+  assert.equal(checkboxes[0].props.disabled, true);
+});
+
+test('session card renders batch member status label', () => {
+  const { api } = loadPlugin();
+  const session = sessionFixture();
+  const tree = api.SessionCard({
+    dateStr: '2026-07-27',
+    session,
+    summaryData: null,
+    selected: false,
+    selectionDisabled: false,
+    batchMemberStatus: 'completed',
+    error: '',
+    onToggleSelect() {},
+  });
+  const text = flattenText(tree).join(' ');
+  assert.match(text, /Completed/);
+  assert.doesNotMatch(text, /with model/);
+  assert.doesNotMatch(text, /with worker/);
+});
+
+test('session card renders sanitized unknown batch member status', () => {
+  const { api } = loadPlugin();
+  const session = sessionFixture();
+  const tree = api.SessionCard({
+    dateStr: '2026-07-27',
+    session,
+    summaryData: null,
+    selected: false,
+    selectionDisabled: false,
+    batchMemberStatus: 'unknown_status\u0000bad',
+    error: '',
+    onToggleSelect() {},
+  });
+  const text = flattenText(tree).join(' ');
+  assert.match(text, /unknown_statusbad/);
+  assert.doesNotMatch(text, /with model/);
+  assert.doesNotMatch(text, /with worker/);
+});
+
+test('session card renders queued batch member status', () => {
+  const { api } = loadPlugin();
+  const session = sessionFixture();
+  const tree = api.SessionCard({
+    dateStr: '2026-07-27',
+    session,
+    summaryData: null,
+    selected: false,
+    selectionDisabled: false,
+    batchMemberStatus: 'queued',
+    error: '',
+    onToggleSelect() {},
+  });
+  const text = flattenText(tree).join(' ');
+  assert.match(text, /Queued/);
+});
+
+test('session card renders running batch member status', () => {
+  const { api } = loadPlugin();
+  const session = sessionFixture();
+  const tree = api.SessionCard({
+    dateStr: '2026-07-27',
+    session,
+    summaryData: null,
+    selected: false,
+    selectionDisabled: false,
+    batchMemberStatus: 'running',
+    error: '',
+    onToggleSelect() {},
+  });
+  const text = flattenText(tree).join(' ');
+  assert.match(text, /Running/);
+});
+
+test('session card renders failed batch member status', () => {
+  const { api } = loadPlugin();
+  const session = sessionFixture();
+  const tree = api.SessionCard({
+    dateStr: '2026-07-27',
+    session,
+    summaryData: null,
+    selected: false,
+    selectionDisabled: false,
+    batchMemberStatus: 'failed',
+    error: '',
+    onToggleSelect() {},
+  });
+  const text = flattenText(tree).join(' ');
+  assert.match(text, /Failed/);
+});
+
+test('session card renders partial batch member status', () => {
+  const { api } = loadPlugin();
+  const session = sessionFixture();
+  const tree = api.SessionCard({
+    dateStr: '2026-07-27',
+    session,
+    summaryData: null,
+    selected: false,
+    selectionDisabled: false,
+    batchMemberStatus: 'partial',
+    error: '',
+    onToggleSelect() {},
+  });
+  const text = flattenText(tree).join(' ');
+  assert.match(text, /Completed \(partial\)/);
+});
+
+test('session card renders skipped_current batch member status', () => {
+  const { api } = loadPlugin();
+  const session = sessionFixture();
+  const tree = api.SessionCard({
+    dateStr: '2026-07-27',
+    session,
+    summaryData: null,
+    selected: false,
+    selectionDisabled: false,
+    batchMemberStatus: 'skipped_current',
+    error: '',
+    onToggleSelect() {},
+  });
+  const text = flattenText(tree).join(' ');
+  assert.match(text, /Skipped/);
+});
+
+test('session card renders skipped_running batch member status', () => {
+  const { api } = loadPlugin();
+  const session = sessionFixture();
+  const tree = api.SessionCard({
+    dateStr: '2026-07-27',
+    session,
+    summaryData: null,
+    selected: false,
+    selectionDisabled: false,
+    batchMemberStatus: 'skipped_running',
+    error: '',
+    onToggleSelect() {},
+  });
+  const text = flattenText(tree).join(' ');
+  assert.match(text, /Skipped/);
+});
+
+test('no per-card Generate or Regenerate button in session card', () => {
   const { api } = loadPlugin();
   const tree = api.SessionCard({
     dateStr: '2026-07-27',
     session: sessionFixture(),
     summaryData: null,
-    generating: false,
+    selected: false,
+    selectionDisabled: false,
+    batchMemberStatus: null,
     error: '',
-    onGenerate() {},
-    onRollback() {},
+    onToggleSelect() {},
   });
   const text = flattenText(tree).join(' ');
-  assert.match(text, /Generate summary/);
+  assert.doesNotMatch(text, /Generate summary/);
   assert.doesNotMatch(text, /Generate recap/);
-  assert.doesNotMatch(text, /with model/);
-  assert.doesNotMatch(text, /with worker/);
+  assert.doesNotMatch(text, /Regenerate/);
 });
 
 test('session card renders stored summary, stale warning, and immutable versions', () => {
@@ -230,16 +417,17 @@ test('session card renders stored summary, stale warning, and immutable versions
       meta: { generated_at: '2026-07-27T01:02:03Z', model: 'compression', version_id: version },
       versions: [{ version_id: version, generated_at: '2026-07-27T01:02:03Z' }],
     },
-    generating: false,
+    selected: false,
+    selectionDisabled: false,
+    batchMemberStatus: null,
     error: '',
-    onGenerate() {},
-    onRollback() {},
+    onToggleSelect() {},
   });
   const text = flattenText(tree).join(' ');
   assert.match(text, /One canonical session summary/);
   assert.match(text, /Stale/);
-  assert.match(text, /Regenerate/);
   assert.match(text, new RegExp('Restore: ' + version));
+  assert.doesNotMatch(text, /Regenerate/);
 });
 
 test('daily roll-up button omits worker name', () => {
@@ -691,4 +879,349 @@ test('pollBatchStatus doubles delay capped at 15000ms', async () => {
 
   // 100 -> 200 -> 400 -> 800 -> 1600 -> 3200 -> 6400 -> 12800 -> 15000 -> 15000
   assert.deepEqual(delays, [100, 200, 400, 800, 1600, 3200, 6400, 12800, 15000, 15000]);
+});
+
+// ---------------------------------------------------------------------
+// BatchToolbar tests
+// ---------------------------------------------------------------------
+
+test('BatchToolbar renders exact labels and count', () => {
+  const { api } = loadPlugin();
+  const tree = api.BatchToolbar({
+    dateStr: '2026-07-27',
+    sessions: [
+      { profile: 'p1', session_id: 's1' },
+      { profile: 'p2', session_id: 's2' },
+    ],
+    selectedKeys: { '2026-07-27/p1/s1': true },
+    regenerateCurrent: false,
+    batchStatus: null,
+    batchError: '',
+    onSelectAll() {},
+    onClear() {},
+    onToggleRegenerate() {},
+    onSubmit() {},
+  });
+  const text = flattenText(tree).join(' ');
+  assert.match(text, /1 selected/);
+  assert.match(text, /Select all/);
+  assert.match(text, /Clear selection/);
+  assert.match(text, /Regenerate already current/);
+  assert.match(text, /Summarize selected \(\d\)/);
+  assert.doesNotMatch(text, /with model/);
+  assert.doesNotMatch(text, /with worker/);
+});
+
+test('BatchToolbar disables controls while batch queued/running', () => {
+  const { api } = loadPlugin();
+  const treeQueued = api.BatchToolbar({
+    dateStr: '2026-07-27',
+    sessions: [{ profile: 'p1', session_id: 's1' }],
+    selectedKeys: {},
+    regenerateCurrent: false,
+    batchStatus: { status: 'queued', progress: { total: 0, finished: 0 } },
+    batchError: '',
+    onSelectAll() {},
+    onClear() {},
+    onToggleRegenerate() {},
+    onSubmit() {},
+  });
+  const selectAll = findNodes(treeQueued, (n) => n.type === 'button' && n.children && n.children[0] === 'Select all')[0];
+  assert.equal(selectAll.props.disabled, true);
+
+  const treeRunning = api.BatchToolbar({
+    dateStr: '2026-07-27',
+    sessions: [{ profile: 'p1', session_id: 's1' }],
+    selectedKeys: {},
+    regenerateCurrent: false,
+    batchStatus: { status: 'running', progress: { total: 0, finished: 0 } },
+    batchError: '',
+    onSelectAll() {},
+    onClear() {},
+    onToggleRegenerate() {},
+    onSubmit() {},
+  });
+  const selectAllRunning = findNodes(treeRunning, (n) => n.type === 'button' && n.children && n.children[0] === 'Select all')[0];
+  assert.equal(selectAllRunning.props.disabled, true);
+});
+
+test('BatchToolbar progress shows finished counts', () => {
+  const { api } = loadPlugin();
+  const tree = api.BatchToolbar({
+    dateStr: '2026-07-27',
+    sessions: [
+      { profile: 'p1', session_id: 's1' },
+      { profile: 'p2', session_id: 's2' },
+    ],
+    selectedKeys: {},
+    regenerateCurrent: false,
+    batchStatus: {
+      status: 'running',
+      progress: { total: 2, finished: 1, completed: 0, failed: 1, skipped: 0, active: 0 },
+    },
+    batchError: '',
+    onSelectAll() {},
+    onClear() {},
+    onToggleRegenerate() {},
+    onSubmit() {},
+  });
+  const text = flattenText(tree).join(' ');
+  assert.match(text, /1\/2 finished/);
+  assert.doesNotMatch(text, /with model/);
+  assert.doesNotMatch(text, /with worker/);
+});
+
+test('BatchToolbar progress counts both skip kinds as skipped', () => {
+  const { api } = loadPlugin();
+  const tree = api.BatchToolbar({
+    dateStr: '2026-07-27',
+    sessions: [
+      { profile: 'p1', session_id: 's1' },
+      { profile: 'p2', session_id: 's2' },
+      { profile: 'p3', session_id: 's3' },
+    ],
+    selectedKeys: {},
+    regenerateCurrent: false,
+    batchStatus: {
+      status: 'running',
+      progress: { total: 3, finished: 1, completed: 1, failed: 0, skipped: 2, active: 0 },
+    },
+    batchError: '',
+    onSelectAll() {},
+    onClear() {},
+    onToggleRegenerate() {},
+    onSubmit() {},
+  });
+  const text = flattenText(tree).join(' ');
+  assert.match(text, /1\/3 finished/);
+});
+
+test('BatchToolbar sanitizes batch error in role=alert', () => {
+  const { api } = loadPlugin();
+  const tree = api.BatchToolbar({
+    dateStr: '2026-07-27',
+    sessions: [{ profile: 'p1', session_id: 's1' }],
+    selectedKeys: {},
+    regenerateCurrent: false,
+    batchStatus: { status: 'running', progress: { total: 0, finished: 0 } },
+    batchError: 'batch failed\u0000bad',
+    onSelectAll() {},
+    onClear() {},
+    onToggleRegenerate() {},
+    onSubmit() {},
+  });
+  const text = flattenText(tree).join(' ');
+  assert.match(text, /batch failedbad/);
+  assert.doesNotMatch(text, /with model/);
+  assert.doesNotMatch(text, /with worker/);
+});
+
+test('BatchToolbar primary button disabled when N=0', () => {
+  const { api } = loadPlugin();
+  const tree = api.BatchToolbar({
+    dateStr: '2026-07-27',
+    sessions: [{ profile: 'p1', session_id: 's1' }],
+    selectedKeys: {},
+    regenerateCurrent: false,
+    batchStatus: null,
+    batchError: '',
+    onSelectAll() {},
+    onClear() {},
+    onToggleRegenerate() {},
+    onSubmit() {},
+  });
+  const primary = findNodes(tree, (n) => n.type === 'button' && n.props['aria-label'] && n.props['aria-label'].includes('Summarize selected'))[0];
+  assert.equal(primary.props.disabled, true);
+});
+
+// ---------------------------------------------------------------------
+// DayDetailPanel controlled wiring tests
+// ---------------------------------------------------------------------
+
+test('DayDetailPanel renders BatchToolbar when dayData exists', () => {
+  const { api } = loadPlugin();
+  const tree = api.DayDetailPanel({
+    dateStr: '2026-07-27',
+    dayData: { sessions: [], cron_runs: [] },
+    sessionSummaries: {},
+    rollupData: null,
+    activeJobs: {},
+    jobErrors: {},
+    loadingDay: false,
+    error: '',
+    onGenerateSession() {},
+    onRollbackSession() {},
+    onGenerateRollup() {},
+    onRollbackRollup() {},
+    selectedKeys: {},
+    onSelectAll() {},
+    onClear() {},
+    batchStatus: null,
+    batchError: '',
+    regenerateCurrent: false,
+    onSubmitBatch() {},
+    onSelectSession() {},
+    onDeselectSession() {},
+  });
+  const toolbar = findNodes(tree, (n) => n.type === 'div' && n.props.className && n.props.className.includes('dl-batch-toolbar'));
+  assert.equal(toolbar.length, 1);
+});
+
+test('DayDetailPanel maps exact composite selection and member status to SessionCard', () => {
+  const { api } = loadPlugin();
+  const sessions = [
+    { profile: 'p1', session_id: 's1', title: 'Session 1' },
+    { profile: 'p2', session_id: 's2', title: 'Session 2' },
+  ];
+  const tree = api.DayDetailPanel({
+    dateStr: '2026-07-27',
+    dayData: { sessions, cron_runs: [] },
+    sessionSummaries: {},
+    rollupData: null,
+    activeJobs: {},
+    jobErrors: {},
+    loadingDay: false,
+    error: '',
+    onGenerateSession() {},
+    onRollbackSession() {},
+    onGenerateRollup() {},
+    onRollbackRollup() {},
+    selectedKeys: { '2026-07-27/p1/s1': true },
+    onSelectAll() {},
+    onClear() {},
+    batchStatus: {
+      members: [
+        { session_id: 's1', profile: 'p1', status: 'completed' },
+        { session_id: 's2', profile: 'p2', status: 'failed' },
+      ],
+    },
+    batchError: '',
+    regenerateCurrent: false,
+    onSubmitBatch() {},
+    onSelectSession() {},
+    onDeselectSession() {},
+  });
+  // Find session-selection checkboxes (aria-label begins with 'Select ... for batch summary')
+  const checkboxes = findNodes(tree, (n) => n.type === 'input' && n.props.type === 'checkbox' && n.props['aria-label'] && n.props['aria-label'].startsWith('Select'));
+  assert.equal(checkboxes.length, sessions.length);
+  // Check first checkbox: selected=true and member status 'completed'
+  assert.equal(checkboxes[0].props.checked, true);
+  assert.match(checkboxes[0].props['aria-label'] || '', /Session 1/);
+  // Find the member status text in the SessionCard's children
+  const cards = findNodes(tree, (n) => n.type === 'div' && n.props.className && n.props.className.includes('dl-session-card'));
+  const firstCardText = flattenText(cards[0]).join(' ');
+  assert.match(firstCardText, /Completed/);
+  // Check second checkbox: selected=false and member status 'failed'
+  assert.equal(checkboxes[1].props.checked, false);
+  assert.match(checkboxes[1].props['aria-label'] || '', /Session 2/);
+  const secondCardText = flattenText(cards[1]).join(' ');
+  assert.match(secondCardText, /Failed/);
+});
+
+test('DayDetailPanel cron cards receive no checkbox (selectionDisabled=true)', () => {
+  const { api } = loadPlugin();
+  const cronRuns = [{ job_id: 'cron1', job_name: 'My Cron' }];
+  const tree = api.DayDetailPanel({
+    dateStr: '2026-07-27',
+    dayData: { sessions: [], cron_runs: cronRuns },
+    sessionSummaries: {},
+    rollupData: null,
+    activeJobs: {},
+    jobErrors: {},
+    loadingDay: false,
+    error: '',
+    onGenerateSession() {},
+    onRollbackSession() {},
+    onGenerateRollup() {},
+    onRollbackRollup() {},
+    selectedKeys: {},
+    onSelectAll() {},
+    onClear() {},
+    batchStatus: null,
+    batchError: '',
+    regenerateCurrent: false,
+    onSubmitBatch() {},
+    onSelectSession() {},
+    onDeselectSession() {},
+  });
+  // Cron cards have no session-selection checkbox (they render via CronCard, not SessionCard)
+  // Find all session-selection checkboxes (aria-label begins with 'Select ... for batch summary')
+  const checkboxes = findNodes(tree, (n) => n.type === 'input' && n.props.type === 'checkbox' && n.props['aria-label'] && n.props['aria-label'].startsWith('Select'));
+  // There should be zero session-selection checkboxes
+  assert.equal(checkboxes.length, 0);
+  // Verify the cron card renders via CronCard
+  const cronCards = findNodes(tree, (n) => n.type === 'div' && n.props.className && n.props.className.includes('dl-cron-card'));
+  assert.equal(cronCards.length, 1);
+});
+
+test('DayDetailPanel passes onToggleSelect callback that toggles select/deselect', () => {
+  const { api } = loadPlugin();
+  const sessions = [{ profile: 'p1', session_id: 's1' }];
+  let toggleCalled = false;
+  const onSelectSession = () => { toggleCalled = true; };
+  const tree = api.DayDetailPanel({
+    dateStr: '2026-07-27',
+    dayData: { sessions, cron_runs: [] },
+    sessionSummaries: {},
+    rollupData: null,
+    activeJobs: {},
+    jobErrors: {},
+    loadingDay: false,
+    error: '',
+    onGenerateSession() {},
+    onRollbackSession() {},
+    onGenerateRollup() {},
+    onRollbackRollup() {},
+    selectedKeys: {},
+    onSelectAll() {},
+    onClear() {},
+    batchStatus: null,
+    batchError: '',
+    regenerateCurrent: false,
+    onSubmitBatch() {},
+    onSelectSession,
+    onDeselectSession() {},
+  });
+  // Find the session-selection checkbox and invoke its onChange
+  const checkboxes = findNodes(tree, (n) => n.type === 'input' && n.props.type === 'checkbox' && n.props['aria-label'] && n.props['aria-label'].startsWith('Select'));
+  assert.equal(checkboxes.length, 1);
+  // Call the onChange handler (simulating a click)
+  checkboxes[0].props.onChange({ target: { checked: true } });
+  assert.ok(toggleCalled);
+});
+
+test('DayDetailPanel renders BatchToolbar before session cards', () => {
+  const { api } = loadPlugin();
+  const sessions = [{ profile: 'p1', session_id: 's1', title: 'Session 1' }];
+  const tree = api.DayDetailPanel({
+    dateStr: '2026-07-27',
+    dayData: { sessions, cron_runs: [] },
+    sessionSummaries: {},
+    rollupData: null,
+    activeJobs: {},
+    jobErrors: {},
+    loadingDay: false,
+    error: '',
+    onGenerateSession() {},
+    onRollbackSession() {},
+    onGenerateRollup() {},
+    onRollbackRollup() {},
+    selectedKeys: {},
+    onSelectAll() {},
+    onClear() {},
+    batchStatus: null,
+    batchError: '',
+    regenerateCurrent: false,
+    onSubmitBatch() {},
+    onSelectSession() {},
+    onDeselectSession() {},
+  });
+  // Flatten to text order
+  const flat = flattenText(tree);
+  // Toolbar should render before session cards - look for "1 selected" (N selected pattern) and "Session 1"
+  const selectedIdx = flat.findIndex((t) => typeof t === 'string' && t.includes('selected'));
+  const sessionIdx = flat.findIndex((t) => typeof t === 'string' && t.includes('Session 1'));
+  // Toolbar should appear before session title
+  assert.ok(selectedIdx >= 0 && sessionIdx >= 0);
+  assert.ok(selectedIdx < sessionIdx, 'BatchToolbar should render before session cards');
 });

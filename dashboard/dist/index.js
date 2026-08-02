@@ -369,19 +369,89 @@
     return React.createElement('div', { className: 'dl-placeholder' }, sanitize(text || 'No data available'));
   }
 
-  // Session detail card with isolated summary controls.
-  function SessionCard({ dateStr, session, summaryData, generating, error, onGenerate, onRollback }) {
+  // Controlled batch selection toolbar
+  function BatchToolbar({ dateStr, sessions, selectedKeys, regenerateCurrent, batchStatus, batchError, onSelectAll, onClear, onToggleRegenerate, onSubmit }) {
+    // Count selected visible sessions only (non-cron sessions have session_id)
+    var visibleSessions = sessions || [];
+    var selectedCount = 0;
+    for (var i = 0; i < visibleSessions.length; i++) {
+      var s = visibleSessions[i];
+      if (s && (s.session_id || s.profile)) {
+        var key = batchSelectionKey(dateStr, s);
+        if (selectedKeys.hasOwnProperty(key)) selectedCount++;
+      }
+    }
+
+    var totalVisible = visibleSessions.length;
+    var isBatchQueued = (batchStatus && String(batchStatus.status || '').toLowerCase() === 'queued');
+    var isBatchRunning = (batchStatus && String(batchStatus.status || '').toLowerCase() === 'running');
+    var batchDisabled = (isBatchQueued || isBatchRunning);
+
+    var progressText = '';
+    if (batchStatus && batchStatus.progress) {
+      var p = batchStatus.progress;
+      var totalP = p.total || 0;
+      var finishedP = p.finished || 0;
+      if (totalP > 0) {
+        var completedP = p.completed || 0;
+        var failedP = p.failed || 0;
+        var skippedP = p.skipped || 0;
+        var activeP = p.active || 0;
+        if (isBatchRunning || isBatchQueued) {
+          progressText = finishedP + '/' + totalP + ' finished';
+        } else {
+          var terminal = completedP + failedP;
+          var terminalText = terminal > 0 ? terminal + ' terminal' : '';
+          progressText = finishedP + '/' + totalP + ' finished' + (terminalText ? ', ' + terminalText : '');
+        }
+      } else {
+        progressText = 'Idle';
+      }
+    } else {
+      progressText = 'Idle';
+    }
+
+    return React.createElement('div', { className: 'dl-batch-toolbar', style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem', padding: '0.5rem', border: '1px solid var(--dl-border)', borderRadius: '0.3rem' } },
+      React.createElement('span', { role: 'status' }, selectedCount + ' selected'),
+      React.createElement('button', {
+        type: 'button',
+        onClick: function () { onSelectAll && onSelectAll(); },
+        disabled: batchDisabled,
+        'aria-label': 'Select all visible sessions',
+      }, 'Select all'),
+      React.createElement('button', {
+        type: 'button',
+        onClick: function () { onClear && onClear(); },
+        disabled: batchDisabled,
+        'aria-label': 'Clear selection',
+      }, 'Clear selection'),
+      React.createElement('label', { style: { display: 'inline-flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.85rem' } },
+        React.createElement('input', {
+          type: 'checkbox',
+          checked: !!regenerateCurrent,
+          onChange: function (e) { onToggleRegenerate && onToggleRegenerate(e.target.checked); },
+          disabled: batchDisabled,
+        }),
+        'Regenerate already current'
+      ),
+      React.createElement('button', {
+        type: 'button',
+        onClick: function () { onSubmit && onSubmit(); },
+        disabled: selectedCount === 0 || batchDisabled,
+        'aria-label': 'Summarize selected sessions',
+      }, 'Summarize selected (' + selectedCount + ')'),
+      React.createElement('span', { role: 'status', style: { marginLeft: 'auto', fontSize: '0.78rem' } }, progressText),
+      batchError && React.createElement('span', { role: 'alert', style: { color: 'var(--dl-destructive)', fontSize: '0.85rem' } }, ' ' + sanitize(batchError))
+    );
+  }
+
+  // Session detail card with read-only summary rendering and controlled selection.
+  function SessionCard({ dateStr, session, summaryData, selected, selectionDisabled, batchMemberStatus, onToggleSelect, error }) {
     var title = sanitize(session.title || 'Untitled session');
     var profile = sanitize(session.profile || '-');
     var source = sanitize(session.source || '-');
-    var model = session.model ? sanitize(session.model) : '';
     var msgs = session.message_count != null ? session.message_count + ' messages' : '';
     var tools = session.tool_call_count != null ? session.tool_call_count + ' tool calls' : '';
-    var detail = summaryData || null;
-    var status = detail || session.summary_status || {};
-    var exists = !!status.exists;
-    var stale = !!status.stale;
-    var job = status.job_status || null;
 
     var timeRange = '';
     if (session.first_active_utc && session.last_active_utc) {
@@ -394,26 +464,47 @@
     if (timeRange) metaParts.push(timeRange);
     if (msgs) metaParts.push(msgs);
     if (tools) metaParts.push(tools);
-    if (model) metaParts.push(model);
-    if (detail && detail.meta && detail.meta.generated_at) metaParts.push('Summary: ' + isoTimeAgo(detail.meta.generated_at));
 
-    var summaryText = detail && detail.data ? sanitize(detail.data.summary || '') : '';
-    var versions = detail && detail.versions ? detail.versions : [];
-    var buttonLabel = exists ? (stale ? '\u21bb Regenerate stale summary' : '\u21bb Force regenerate') : 'Generate summary';
+    var status = summaryData || session.summary_status || {};
+    var exists = !!status.exists;
+    var stale = !!status.stale;
+    var summaryText = summaryData && summaryData.data ? sanitize(summaryData.data.summary || '') : '';
+    var versions = summaryData && summaryData.versions ? summaryData.versions : [];
+    var job = status.job_status || null;
     var jobError = job && job.status === 'failed' ? sanitize(job.error || 'Summary generation failed') : '';
+
+    // Sanitize batch member status text (queued/running/completed/failed/skipped_current/skipped_running)
+    var memberStatusText = '';
+    if (batchMemberStatus) {
+      var mStatus = String(batchMemberStatus).toLowerCase();
+      if (mStatus === 'queued') memberStatusText = 'Queued';
+      else if (mStatus === 'running') memberStatusText = 'Running';
+      else if (mStatus === 'completed') memberStatusText = 'Completed';
+      else if (mStatus === 'partial') memberStatusText = 'Completed (partial)';
+      else if (mStatus === 'failed') memberStatusText = 'Failed';
+      else if (mStatus === 'skipped_current') memberStatusText = 'Skipped';
+      else if (mStatus === 'skipped_running') memberStatusText = 'Skipped';
+      else memberStatusText = sanitize(batchMemberStatus || 'Unknown');
+    }
+
+    var label = 'Select ' + title + ' for batch summary';
+    var statusLabel = memberStatusText ? ' ' + memberStatusText : '';
 
     return React.createElement('div', { className: 'dl-session-card' },
       React.createElement('div', { className: 'dl-session-heading' },
+        React.createElement('input', {
+          type: 'checkbox',
+          checked: !!selected,
+          disabled: !!selectionDisabled,
+          onChange: function (e) { if (typeof onToggleSelect === 'function') { onToggleSelect(session); } },
+          'aria-label': label + statusLabel,
+        }),
         React.createElement('a', {
           className: 'dl-session-title',
           href: sessionChatHref(session),
+          title: label,
         }, title),
-        React.createElement(C.Button || 'button', {
-          className: 'dl-generate-btn dl-session-generate-btn',
-          disabled: !!generating,
-          onClick: function () { onGenerate(dateStr, session, exists); },
-          'aria-label': buttonLabel + ' for ' + title,
-        }, generating ? 'Generating summary\u2026' : buttonLabel)
+        memberStatusText && React.createElement('span', { className: 'dl-session-member-status', role: 'status' }, ' (' + memberStatusText + ')')
       ),
       React.createElement('div', { className: 'dl-meta' },
         React.createElement('span', { className: 'dl-badge dl-badge-profile' }, profile),
@@ -423,10 +514,6 @@
       metaParts.length > 0 && React.createElement('div', { className: 'dl-meta', style: { marginTop: '0.2rem' } }, metaParts.map(function (m) {
         return React.createElement('span', { key: m }, m);
       })),
-      generating && React.createElement('div', { className: 'dl-generating dl-session-generating' },
-        React.createElement('span', { className: 'dl-spinner' }),
-        'Generating summary\u2026'
-      ),
       stale && React.createElement('div', { className: 'dl-stale-banner' }, 'Stale: source activity changed after this summary was generated.'),
       summaryText && React.createElement('div', { className: 'dl-recap-content dl-session-summary' }, summaryText),
       (error || jobError) && ErrorMessage({ message: error || jobError }),
@@ -637,8 +724,8 @@
     );
   }
 
-  // Day detail panel
-  function DayDetailPanel({ dateStr, dayData, sessionSummaries, rollupData, activeJobs, jobErrors, loadingDay, error, onGenerateSession, onRollbackSession, onGenerateRollup, onRollbackRollup }) {
+  // Day detail panel with controlled batch selection rendering
+  function DayDetailPanel({ dateStr, dayData, sessionSummaries, rollupData, activeJobs, jobErrors, loadingDay, error, onGenerateSession, onRollbackSession, onGenerateRollup, onRollbackRollup, selectedKeys, onSelectAll, onClear, batchStatus, batchError, regenerateCurrent, onSubmitBatch, onSelectSession, onDeselectSession }) {
     if (loadingDay) {
       return React.createElement('div', { className: 'dl-detail-panel' },
         React.createElement('div', { className: 'dl-detail-date' }, dateStr),
@@ -661,22 +748,49 @@
       if (detail.exists && !detail.stale) currentSummaryCount++;
     }
 
+    // Build member status map from batch status
+    var memberStatusMap = batchMemberStatusMap(dateStr, batchStatus);
+
     return React.createElement('div', { className: 'dl-detail-panel' },
       React.createElement('div', { className: 'dl-detail-date' }, dateStr),
       error && ErrorMessage({ message: error }),
+      // Render BatchToolbar before session cards whenever dayData exists (including zero sessions)
+      React.createElement(BatchToolbar, {
+        dateStr: dateStr,
+        sessions: sessions,
+        selectedKeys: selectedKeys || {},
+        regenerateCurrent: !!regenerateCurrent,
+        batchStatus: batchStatus,
+        batchError: batchError,
+        onSelectAll: onSelectAll,
+        onClear: onClear,
+        onToggleRegenerate: function () {},
+        onSubmit: onSubmitBatch,
+      }),
       sessions.length > 0 && React.createElement(React.Fragment, null,
         React.createElement('div', { className: 'dl-section-title' }, sessions.length + (sessions.length === 1 ? ' Session' : ' Sessions')),
         sessions.map(function (s) {
           var key = sessionKey(s, dateStr);
+          var isSelected = (selectedKeys && selectedKeys.hasOwnProperty(key));
+          var isCron = !s.session_id; // cron cards have no session_id
+          var selectionDisabled = isCron;
+          var memberStatus = memberStatusMap[key] || null;
           return React.createElement(SessionCard, {
             key: key,
             dateStr: dateStr,
             session: s,
             summaryData: sessionSummaries[key] || null,
-            generating: !!activeJobs[key],
+            selected: isSelected,
+            selectionDisabled: selectionDisabled,
+            batchMemberStatus: memberStatus,
             error: jobErrors[key] || '',
-            onGenerate: onGenerateSession,
-            onRollback: onRollbackSession,
+            onToggleSelect: function (session) {
+              if (isSelected) {
+                onDeselectSession && onDeselectSession(session);
+              } else {
+                onSelectSession && onSelectSession(session);
+              }
+            },
           });
         })
       ),
