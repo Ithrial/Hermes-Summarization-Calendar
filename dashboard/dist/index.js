@@ -460,6 +460,7 @@
     var title = sanitize(session.title || 'Untitled session');
     var profile = sanitize(session.profile || '-');
     var source = sanitize(session.source || '-');
+    var model = session.model ? sanitize(session.model) : '';
     var msgs = session.message_count != null ? session.message_count + ' messages' : '';
     var tools = session.tool_call_count != null ? session.tool_call_count + ' tool calls' : '';
 
@@ -474,6 +475,7 @@
     if (timeRange) metaParts.push(timeRange);
     if (msgs) metaParts.push(msgs);
     if (tools) metaParts.push(tools);
+    if (model) metaParts.push('Model: ' + model);
 
     var status = summaryData || session.summary_status || {};
     var exists = !!status.exists;

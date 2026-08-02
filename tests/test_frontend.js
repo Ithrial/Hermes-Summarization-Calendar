@@ -258,6 +258,40 @@ test('session title renders as the sanitized exact-session link', () => {
   assert.equal(flattenText(links[0]).join(''), 'Build the thing');
 });
 
+test('session card shows the sanitized session model in its detail row', () => {
+  const { api } = loadPlugin();
+  const session = Object.assign(sessionFixture(), { model: 'Qwen3-Coder\u0000' });
+  const tree = api.SessionCard({
+    dateStr: '2026-07-27',
+    session,
+    summaryData: null,
+    selected: false,
+    selectionDisabled: false,
+    batchMemberStatus: null,
+    error: '',
+    onToggleSelect() {},
+  });
+  const text = flattenText(tree).join(' ');
+  assert.match(text, /Model: Qwen3-Coder/);
+  assert.doesNotMatch(text, /\u0000/);
+});
+
+test('session card omits the model label when inventory has no model', () => {
+  const { api } = loadPlugin();
+  const session = Object.assign(sessionFixture(), { model: null });
+  const tree = api.SessionCard({
+    dateStr: '2026-07-27',
+    session,
+    summaryData: null,
+    selected: false,
+    selectionDisabled: false,
+    batchMemberStatus: null,
+    error: '',
+    onToggleSelect() {},
+  });
+  assert.doesNotMatch(flattenText(tree).join(' '), /Model:/);
+});
+
 test('session card checkbox is controlled by selected prop', () => {
   const { api } = loadPlugin();
   const session = sessionFixture();
