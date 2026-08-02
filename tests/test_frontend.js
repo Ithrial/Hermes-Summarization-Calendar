@@ -38,9 +38,11 @@ function loadPlugin(options = {}) {
   ].join('\n');
   const instrumented = source.replace(marker, expose + marker);
 
-  const captured = { component: null, initialState: null };
+  const captured = { component: null, initialState: null, effects: [] };
   let statefulValue;
   let statefulInitialized = false;
+  const refSlots = [];
+  let refCursor = 0;
   function applyState(update) {
     statefulValue = typeof update === 'function' ? update(statefulValue) : update;
     return statefulValue;
@@ -64,10 +66,17 @@ function loadPlugin(options = {}) {
       }
       return [statefulValue, applyState];
     },
-    useEffect() {},
+    useEffect(fn) {
+      if (options.captureEffects) captured.effects.push(fn);
+    },
     useCallback(fn) { return fn; },
     useMemo(fn) { return fn(); },
-    useRef(value) { return { current: value }; },
+    useRef(initial) {
+      if (!options.stateful) return { current: initial };
+      const slot = refCursor++;
+      if (!refSlots[slot]) refSlots[slot] = { current: initial };
+      return refSlots[slot];
+    },
   };
   const window = {
     __HERMES_PLUGIN_SDK__: {
@@ -101,7 +110,14 @@ function loadPlugin(options = {}) {
   if (options.stateful) {
     captured.getState = function () { return statefulValue; };
     captured.replaceState = applyState;
-    captured.render = function () { return captured.component(); };
+    captured.render = function () {
+      refCursor = 0;
+      if (options.captureEffects) captured.effects = [];
+      return captured.component();
+    };
+    captured.runEffects = function () {
+      return captured.effects.map(function (effect) { return effect(); });
+    };
   }
 
   return { api: window.__DAILY_LEDGER_TEST__, captured, source };
@@ -680,7 +696,7 @@ test('summarizeBatchProgress counts all fields correctly', () => {
   };
   const summary = api.summarizeBatchProgress(batch);
   assert.equal(summary.total, 7);
-  assert.equal(summary.finished, 3); // completed + partial + failed
+  assert.equal(summary.finished, 5); // completed + partial + failed + both skips
   assert.equal(summary.completed, 2); // completed + partial counts
   assert.equal(summary.failed, 1);
   assert.equal(summary.skipped, 2);
@@ -819,7 +835,7 @@ test('pollBatchStatus stops on terminal status and calls onTerminal', async () =
   let scheduledTick = null;
   let timerCalls = 0;
   const { api } = loadPlugin({
-    fetchJSON: () => Promise.resolve({ job_status: { status: 'completed' } }),
+    fetchJSON: () => Promise.resolve({ status: 'completed', members: [] }),
     setTimeout(fn, ms) {
       timerCalls++;
       scheduledTick = fn;
@@ -835,7 +851,7 @@ test('pollBatchStatus stops on terminal status and calls onTerminal', async () =
   await Promise.resolve();
 
   assert.equal(results.length, 1);
-  assert.ok(results[0].job_status.status === 'completed');
+  assert.equal(results[0].status, 'completed');
   assert.equal(timerCalls, 1);
   onCancel();
 });
@@ -953,7 +969,7 @@ test('BatchToolbar disables controls while batch queued/running', () => {
     sessions: [{ profile: 'p1', session_id: 's1' }],
     selectedKeys: {},
     regenerateCurrent: false,
-    batchStatus: { status: 'queued', progress: { total: 0, finished: 0 } },
+    batchStatus: { status: 'queued', total: 0, members: [] },
     batchError: '',
     onSelectAll() {},
     onClear() {},
@@ -968,7 +984,7 @@ test('BatchToolbar disables controls while batch queued/running', () => {
     sessions: [{ profile: 'p1', session_id: 's1' }],
     selectedKeys: {},
     regenerateCurrent: false,
-    batchStatus: { status: 'running', progress: { total: 0, finished: 0 } },
+    batchStatus: { status: 'running', total: 0, members: [] },
     batchError: '',
     onSelectAll() {},
     onClear() {},
@@ -991,7 +1007,11 @@ test('BatchToolbar progress shows finished counts', () => {
     regenerateCurrent: false,
     batchStatus: {
       status: 'running',
-      progress: { total: 2, finished: 1, completed: 0, failed: 1, skipped: 0, active: 0 },
+      total: 2,
+      members: [
+        { profile: 'p1', session_id: 's1', status: 'failed' },
+        { profile: 'p2', session_id: 's2', status: 'running' },
+      ],
     },
     batchError: '',
     onSelectAll() {},
@@ -1018,7 +1038,12 @@ test('BatchToolbar progress counts both skip kinds as skipped', () => {
     regenerateCurrent: false,
     batchStatus: {
       status: 'running',
-      progress: { total: 3, finished: 1, completed: 1, failed: 0, skipped: 2, active: 0 },
+      total: 3,
+      members: [
+        { profile: 'p1', session_id: 's1', status: 'completed' },
+        { profile: 'p2', session_id: 's2', status: 'skipped_current' },
+        { profile: 'p3', session_id: 's3', status: 'skipped_running' },
+      ],
     },
     batchError: '',
     onSelectAll() {},
@@ -1027,7 +1052,8 @@ test('BatchToolbar progress counts both skip kinds as skipped', () => {
     onSubmit() {},
   });
   const text = flattenText(tree).join(' ');
-  assert.match(text, /1\/3 finished/);
+  assert.match(text, /3\/3 finished/);
+  assert.match(text, /2 skipped/);
 });
 
 test('BatchToolbar sanitizes batch error in role=alert', () => {
@@ -1037,7 +1063,7 @@ test('BatchToolbar sanitizes batch error in role=alert', () => {
     sessions: [{ profile: 'p1', session_id: 's1' }],
     selectedKeys: {},
     regenerateCurrent: false,
-    batchStatus: { status: 'running', progress: { total: 0, finished: 0 } },
+    batchStatus: { status: 'running', total: 0, members: [] },
     batchError: 'batch failed\u0000bad',
     onSelectAll() {},
     onClear() {},
@@ -1260,8 +1286,8 @@ test('DayDetailPanel renders BatchToolbar before session cards', () => {
   assert.ok(selectedIdx < sessionIdx, 'BatchToolbar should render before session cards');
 });
 
-function setupStatefulCalendar() {
-  const loaded = loadPlugin({ stateful: true });
+function setupStatefulCalendar(options = {}) {
+  const loaded = loadPlugin(Object.assign({ stateful: true }, options));
   loaded.captured.render();
   return loaded;
 }
@@ -1449,4 +1475,190 @@ test('Today preserves same-date batch UI state and clears it when changing dates
   assert.equal(changed.regenerateCurrent, false);
   assert.equal(changed.batchStatus, null);
   assert.equal(changed.batchError, '');
+});
+
+async function flushPromises(rounds = 8) {
+  for (let i = 0; i < rounds; i++) await Promise.resolve();
+}
+
+test('Calendar submits one exact batch, polls top-level status, and refreshes artifacts', async () => {
+  const calls = [];
+  const timers = [];
+  const batch = {
+    status: 'queued', batch_id: 'batch-one', date: '2026-07-27', total: 2,
+    members: [
+      { profile: 'default', session_id: 'one', status: 'queued' },
+      { profile: 'other', session_id: 'two', status: 'queued' },
+    ],
+  };
+  const loaded = setupStatefulCalendar({
+    fetchJSON(url, options) {
+      calls.push({ url, options });
+      if (options && options.method === 'POST') return Promise.resolve(batch);
+      if (url.includes('/session-summary/batch?')) {
+        return Promise.resolve(Object.assign({}, batch, {
+          status: 'completed',
+          members: batch.members.map((member) => Object.assign({}, member, { status: 'completed' })),
+        }));
+      }
+      if (url.includes('/day?')) return Promise.resolve({ sessions: [], cron_runs: [] });
+      if (url.includes('/session-summary/rollup?')) return Promise.resolve({ exists: false });
+      if (url.includes('/month?')) return Promise.resolve({ days: [] });
+      throw new Error('Unexpected request ' + url);
+    },
+    setTimeout(fn) { timers.push(fn); return timers.length; },
+    clearTimeout() {},
+  });
+  const { api, captured } = loaded;
+  const sessions = [
+    { profile: 'default', session_id: 'one' },
+    { profile: 'other', session_id: 'two' },
+  ];
+  const date = '2026-07-27';
+  const selectedSessions = {};
+  for (const session of sessions) selectedSessions[api.batchSelectionKey(date, session)] = true;
+  setBatchUiState(captured, {
+    selectedDate: date,
+    dayData: { sessions, cron_runs: [] },
+    selectedSessions,
+    regenerateCurrent: true,
+  });
+
+  const panel = rawCalendarChild(api, captured, api.DayDetailPanel);
+  panel.props.onSubmitBatch();
+  panel.props.onSubmitBatch();
+  assert.equal(calls.filter((call) => call.options && call.options.method === 'POST').length, 1);
+  assert.equal(captured.getState().batchStatus.status, 'queued');
+
+  const post = calls.find((call) => call.options && call.options.method === 'POST');
+  assert.match(post.url, /\/session-summary\/batch\?date=2026-07-27$/);
+  assert.deepEqual(JSON.parse(post.options.body), {
+    sessions: [
+      { profile: 'default', session_id: 'one' },
+      { profile: 'other', session_id: 'two' },
+    ],
+    regenerate_current: true,
+  });
+
+  await flushPromises();
+  assert.equal(captured.getState().batchStatus.batch_id, 'batch-one');
+  assert.equal(timers.length, 1);
+  timers.shift()();
+  await flushPromises();
+
+  assert.equal(captured.getState().batchStatus.status, 'completed');
+  assert.ok(calls.some((call) => call.url.includes('/session-summary/batch?date=2026-07-27&batch_id=batch-one')));
+  assert.ok(calls.some((call) => call.url.includes('/day?date=2026-07-27')));
+  assert.ok(calls.some((call) => call.url.includes('/month?year=2026&month=7')));
+});
+
+test('Calendar surfaces sanitized batch submission failure and unlocks the toolbar', async () => {
+  let posts = 0;
+  const { api, captured } = setupStatefulCalendar({
+    fetchJSON(url, options) {
+      if (options && options.method === 'POST') {
+        posts++;
+        return Promise.reject(new Error('submit failed\u0000bad'));
+      }
+      throw new Error('Unexpected request ' + url);
+    },
+  });
+  const session = { profile: 'default', session_id: 'one' };
+  const date = '2026-07-27';
+  setBatchUiState(captured, {
+    selectedDate: date,
+    dayData: { sessions: [session], cron_runs: [] },
+    selectedSessions: { [api.batchSelectionKey(date, session)]: true },
+  });
+
+  rawCalendarChild(api, captured, api.DayDetailPanel).props.onSubmitBatch();
+  await flushPromises();
+  assert.equal(posts, 1);
+  assert.equal(captured.getState().batchStatus, null);
+  assert.match(captured.getState().batchError, /Batch submission failed: submit failedbad/);
+});
+
+test('Calendar recovers latest running batch after refresh and cancels its poll on date change', async () => {
+  const calls = [];
+  const timers = [];
+  const cleared = [];
+  const running = {
+    status: 'running', batch_id: 'batch-recovered', date: '2026-07-27', total: 1,
+    members: [{ profile: 'default', session_id: 'one', status: 'running' }],
+  };
+  const { api, captured } = setupStatefulCalendar({
+    captureEffects: true,
+    fetchJSON(url) {
+      calls.push(url);
+      if (url.endsWith('/health')) return Promise.resolve({ status: 'ok' });
+      if (url.includes('/month?')) return Promise.resolve({ days: [] });
+      if (url.includes('/day?')) return Promise.resolve({ sessions: [], cron_runs: [] });
+      if (url.includes('/session-summary/batches?')) return Promise.resolve({ batches: [running] });
+      if (url.includes('/session-summary/rollup?')) return Promise.resolve({ exists: false });
+      throw new Error('Unexpected request ' + url);
+    },
+    setTimeout(fn) { timers.push(fn); return timers.length; },
+    clearTimeout(id) { cleared.push(id); },
+  });
+  captured.replaceState((state) => Object.assign({}, state, {
+    selectedDate: '2026-07-27', viewYear: 2026, viewMonth: 6,
+  }));
+  captured.render();
+  captured.runEffects();
+  await flushPromises();
+
+  assert.ok(calls.some((url) => url.includes('/session-summary/batches?date=2026-07-27&limit=1')));
+  assert.equal(captured.getState().batchStatus.batch_id, 'batch-recovered');
+  assert.equal(captured.getState().batchStatus.status, 'running');
+  assert.equal(timers.length, 1);
+
+  const grid = rawCalendarChild(api, captured, api.MonthGrid);
+  grid.props.onDayClick('2026-07-28');
+  assert.deepEqual(cleared, [1]);
+  assert.equal(captured.getState().selectedDate, '2026-07-28');
+  assert.equal(captured.getState().batchStatus, null);
+});
+
+test('SessionCard immutable version restore invokes the supplied rollback callback', () => {
+  const { api } = loadPlugin();
+  const calls = [];
+  const session = { profile: 'default', session_id: 'one', title: 'Restore me' };
+  const tree = api.SessionCard({
+    dateStr: '2026-07-27',
+    session,
+    summaryData: {
+      exists: true,
+      data: { summary: 'Stored summary' },
+      versions: [{ version_id: 'version-one', generated_at: '2026-07-27T12:00:00Z' }],
+    },
+    selected: false,
+    selectionDisabled: false,
+    batchMemberStatus: null,
+    onToggleSelect() {},
+    onRollback(date, restoredSession, versionId) {
+      calls.push({ date, restoredSession, versionId });
+    },
+    error: '',
+  });
+  const restore = findNodes(tree, (node) =>
+    node.type === 'button' && node.props.className === 'dl-rollback-btn')[0];
+  assert.ok(restore);
+  restore.props.onClick();
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].date, '2026-07-27');
+  assert.equal(calls[0].restoredSession, session);
+  assert.equal(calls[0].versionId, 'version-one');
+});
+
+test('batch control stylesheet includes focus, disabled, and mobile states', () => {
+  const css = fs.readFileSync(path.join(__dirname, '..', 'dashboard', 'dist', 'style.css'), 'utf8');
+  for (const className of [
+    '.dl-batch-toolbar', '.dl-batch-btn', '.dl-batch-submit', '.dl-batch-option',
+    '.dl-batch-progress', '.dl-batch-error', '.dl-session-select',
+  ]) {
+    assert.match(css, new RegExp(className.replace('.', '\\.')));
+  }
+  assert.match(css, /\.dl-batch-btn:focus-visible/);
+  assert.match(css, /\.dl-batch-btn:disabled/);
+  assert.match(css, /@media\s*\(max-width:\s*640px\)[\s\S]*\.dl-batch-toolbar/);
 });

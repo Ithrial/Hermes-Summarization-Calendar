@@ -258,6 +258,109 @@
   color: var(--dl-fg);
 }
 
+/* --- Batch summary controls --- */
+
+.dl-batch-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.65rem;
+  border: 1px solid var(--dl-border);
+  border-radius: var(--dl-radius);
+  background: color-mix(in srgb, var(--dl-card-bg) 92%, var(--dl-primary));
+}
+
+.dl-batch-count {
+  min-width: 4.75rem;
+  color: var(--dl-fg);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.dl-batch-btn {
+  min-height: 2.1rem;
+  padding: 0.4rem 0.65rem;
+  border: 1px solid var(--dl-border);
+  border-radius: calc(var(--dl-radius) * 0.75);
+  background: transparent;
+  color: var(--dl-fg);
+  cursor: pointer;
+  font-size: 0.78rem;
+  line-height: 1.2;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+
+.dl-batch-btn:hover:not(:disabled) {
+  border-color: var(--dl-primary);
+  color: var(--dl-primary);
+}
+
+.dl-batch-btn:focus-visible,
+.dl-batch-checkbox:focus-visible,
+.dl-session-select:focus-visible {
+  outline: 2px solid var(--dl-primary);
+  outline-offset: 2px;
+}
+
+.dl-batch-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.dl-batch-submit {
+  border-color: var(--dl-primary);
+  color: var(--dl-primary);
+  font-weight: 600;
+}
+
+.dl-batch-submit:hover:not(:disabled) {
+  background: var(--dl-primary);
+  color: var(--dl-card-bg);
+}
+
+.dl-batch-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--dl-muted);
+  font-size: 0.78rem;
+}
+
+.dl-batch-checkbox,
+.dl-session-select {
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  accent-color: var(--dl-primary);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.dl-batch-checkbox:disabled,
+.dl-session-select:disabled {
+  cursor: not-allowed;
+}
+
+.dl-batch-progress {
+  margin-left: auto;
+  color: var(--dl-muted);
+  font-size: 0.76rem;
+}
+
+.dl-batch-error {
+  flex-basis: 100%;
+  color: var(--dl-destructive);
+  font-size: 0.8rem;
+}
+
+.dl-session-member-status {
+  margin-left: auto;
+  color: var(--dl-muted);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
 .dl-section-title {
   font-size: 0.85rem;
   font-weight: 600;
@@ -382,9 +485,13 @@
 
 .dl-session-heading {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.75rem;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.5rem;
+}
+
+.dl-session-heading .dl-session-title {
+  flex: 1 1 auto;
 }
 
 .dl-session-generate-btn {
@@ -547,9 +654,30 @@
     gap: 0.2rem 0.5rem;
   }
 
+  .dl-batch-toolbar {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dl-batch-count,
+  .dl-batch-option,
+  .dl-batch-progress,
+  .dl-batch-error {
+    grid-column: 1 / -1;
+    margin-left: 0;
+  }
+
+  .dl-batch-btn {
+    width: 100%;
+  }
+
   .dl-session-heading {
-    align-items: stretch;
-    flex-direction: column;
+    align-items: center;
+    flex-direction: row;
+  }
+
+  .dl-session-member-status {
+    white-space: normal;
   }
 
   .dl-session-generate-btn {

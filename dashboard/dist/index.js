@@ -257,6 +257,7 @@
         else if (status === 'failed') failed++;
         else if (status === 'partial') completed++; // partial counts as finished with success
       } else if (status === 'skipped_current' || status === 'skipped_running') {
+        finished++;
         skipped++;
       } else {
         active++;
@@ -320,8 +321,7 @@
         .then(function (data) {
           if (cancelled) return;
           if (data && onUpdate) onUpdate(data);
-          var job = data && data.job_status;
-          var status = job ? (job.status || '').toLowerCase() : '';
+          var status = data ? String(data.status || '').toLowerCase() : '';
           if (status === 'completed' || status === 'partial' || status === 'failed') {
             if (onTerminal) onTerminal(data);
             return;
@@ -399,47 +399,44 @@
     var isBatchRunning = (batchStatus && String(batchStatus.status || '').toLowerCase() === 'running');
     var isBatchQueued = (batchStatus && String(batchStatus.status || '').toLowerCase() === 'queued');
 
-    var progressText = '';
-    if (batchStatus && batchStatus.progress) {
-      var p = batchStatus.progress;
-      var totalP = p.total || 0;
+    var progressText = 'Idle';
+    if (batchStatus) {
+      var p = summarizeBatchProgress(batchStatus);
+      var totalP = Number(batchStatus.total || p.total || 0);
       var finishedP = p.finished || 0;
+      var completedP = p.completed || 0;
+      var failedP = p.failed || 0;
+      var skippedP = p.skipped || 0;
       if (totalP > 0) {
-        var completedP = p.completed || 0;
-        var failedP = p.failed || 0;
-        var skippedP = p.skipped || 0;
-        var activeP = p.active || 0;
-        if (isBatchRunning || isBatchQueued) {
-          progressText = finishedP + '/' + totalP + ' finished';
-        } else {
-          var terminal = completedP + failedP;
-          var terminalText = terminal > 0 ? terminal + ' terminal' : '';
-          progressText = finishedP + '/' + totalP + ' finished' + (terminalText ? ', ' + terminalText : '');
-        }
-      } else {
-        progressText = 'Idle';
+        progressText = finishedP + '/' + totalP + ' finished' +
+          ' — ' + completedP + ' completed, ' + failedP + ' failed, ' + skippedP + ' skipped';
+      } else if (isBatchQueued) {
+        progressText = 'Queued';
+      } else if (isBatchRunning) {
+        progressText = 'Running';
       }
-    } else {
-      progressText = 'Idle';
     }
 
-    return React.createElement('div', { className: 'dl-batch-toolbar', style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem', padding: '0.5rem', border: '1px solid var(--dl-border)', borderRadius: '0.3rem' } },
-      React.createElement('span', { role: 'status' }, selectedCount + ' selected'),
+    return React.createElement('div', { className: 'dl-batch-toolbar' },
+      React.createElement('span', { className: 'dl-batch-count', role: 'status' }, selectedCount + ' selected'),
       React.createElement('button', {
         type: 'button',
+        className: 'dl-batch-btn',
         onClick: function () { onSelectAll && onSelectAll(); },
         disabled: batchDisabled,
         'aria-label': 'Select all visible sessions',
       }, 'Select all'),
       React.createElement('button', {
         type: 'button',
+        className: 'dl-batch-btn',
         onClick: function () { onClear && onClear(); },
         disabled: batchDisabled,
         'aria-label': 'Clear selection',
       }, 'Clear selection'),
-      React.createElement('label', { style: { display: 'inline-flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.85rem' } },
+      React.createElement('label', { className: 'dl-batch-option' },
         React.createElement('input', {
           type: 'checkbox',
+          className: 'dl-batch-checkbox',
           checked: !!regenerateCurrent,
           onChange: function (e) { onToggleRegenerate && onToggleRegenerate(e.target.checked); },
           disabled: batchDisabled,
@@ -448,17 +445,18 @@
       ),
       React.createElement('button', {
         type: 'button',
+        className: 'dl-batch-btn dl-batch-submit',
         onClick: function () { onSubmit && onSubmit(); },
         disabled: selectedCount === 0 || batchDisabled,
         'aria-label': 'Summarize selected sessions',
       }, 'Summarize selected (' + selectedCount + ')'),
-      React.createElement('span', { role: 'status', style: { marginLeft: 'auto', fontSize: '0.78rem' } }, progressText),
-      batchError && React.createElement('span', { role: 'alert', style: { color: 'var(--dl-destructive)', fontSize: '0.85rem' } }, ' ' + sanitize(batchError))
+      React.createElement('span', { className: 'dl-batch-progress', role: 'status' }, progressText),
+      batchError && React.createElement('span', { className: 'dl-batch-error', role: 'alert' }, sanitize(batchError))
     );
   }
 
   // Session detail card with read-only summary rendering and controlled selection.
-  function SessionCard({ dateStr, session, summaryData, selected, selectionDisabled, batchMemberStatus, onToggleSelect, error }) {
+  function SessionCard({ dateStr, session, summaryData, selected, selectionDisabled, batchMemberStatus, onToggleSelect, onRollback, error }) {
     var title = sanitize(session.title || 'Untitled session');
     var profile = sanitize(session.profile || '-');
     var source = sanitize(session.source || '-');
@@ -506,6 +504,7 @@
       React.createElement('div', { className: 'dl-session-heading' },
         React.createElement('input', {
           type: 'checkbox',
+          className: 'dl-session-select',
           checked: !!selected,
           disabled: !!selectionDisabled,
           onChange: function (e) { if (typeof onToggleSelect === 'function') { onToggleSelect(session); } },
@@ -531,7 +530,9 @@
       (error || jobError) && ErrorMessage({ message: error || jobError }),
       versions.length > 0 && React.createElement(VersionButtons, {
         versions: versions,
-        onRestore: function (versionId) { onRollback(dateStr, session, versionId); },
+        onRestore: function (versionId) {
+          if (typeof onRollback === 'function') onRollback(dateStr, session, versionId);
+        },
       })
     );
   }
@@ -799,6 +800,7 @@
             selectionDisabled: selectionDisabled,
             batchMemberStatus: memberStatus,
             error: jobErrors[key] || '',
+            onRollback: onRollbackSession,
             onToggleSelect: function (session) {
               if (isSelected) {
                 onDeselectSession && onDeselectSession(session);
@@ -878,6 +880,13 @@
 
     // One cancellable poll per composite session identity or daily roll-up.
     var pollRefs = useRef({});
+    var selectedDateRef = useRef(stateVal.selectedDate);
+    var batchSubmitRef = useRef(false);
+    selectedDateRef.current = stateVal.selectedDate;
+
+    var updateState = useCallback(function (patch) {
+      setState(function (s) { return Object.assign({}, s, patch); });
+    }, [setState]);
 
     // Month data as a lookup map
     var monthDayMap = useMemo(function () {
@@ -917,9 +926,96 @@
         });
     }, [setState]);
 
+    function batchPollKey(dateStr) {
+      return 'batch:' + String(dateStr || '');
+    }
+
+    function cancelBatchPoll(dateStr) {
+      var key = batchPollKey(dateStr);
+      if (pollRefs.current[key]) {
+        pollRefs.current[key]();
+        delete pollRefs.current[key];
+      }
+    }
+
+    function cancelAllBatchPolls() {
+      Object.keys(pollRefs.current).forEach(function (key) {
+        if (key.indexOf('batch:') === 0) {
+          pollRefs.current[key]();
+          delete pollRefs.current[key];
+        }
+      });
+    }
+
+    function beginBatchPoll(dateStr, batchId) {
+      if (!dateStr || !batchId) return;
+      var key = batchPollKey(dateStr);
+      cancelBatchPoll(dateStr);
+      var path = '/session-summary/batch' + encodeUrlParams({
+        date: dateStr,
+        batch_id: batchId,
+      });
+      pollRefs.current[key] = pollBatchStatus(
+        path,
+        function (batch) {
+          if (selectedDateRef.current !== dateStr) return;
+          setState(function (s) {
+            if (s.selectedDate !== dateStr) return s;
+            return Object.assign({}, s, { batchStatus: batch, batchError: '' });
+          });
+        },
+        function (batch) {
+          delete pollRefs.current[key];
+          if (selectedDateRef.current === dateStr) {
+            setState(function (s) {
+              if (s.selectedDate !== dateStr) return s;
+              return Object.assign({}, s, { batchStatus: batch, batchError: '' });
+            });
+            loadDay(dateStr, { skipBatchDiscovery: true });
+            var parsed = parseDate(dateStr);
+            loadMonth(parsed.year, parsed.month);
+          }
+        },
+        function (message) {
+          delete pollRefs.current[key];
+          if (selectedDateRef.current !== dateStr) return;
+          setState(function (s) {
+            if (s.selectedDate !== dateStr) return s;
+            return Object.assign({}, s, { batchError: sanitize(message) });
+          });
+        },
+        JOB_POLL_MAX_ATTEMPTS,
+        2000
+      );
+    }
+
+    function discoverLatestBatch(dateStr) {
+      apiGet('/session-summary/batches' + encodeUrlParams({ date: dateStr, limit: '1' }))
+        .then(function (response) {
+          if (selectedDateRef.current !== dateStr) return;
+          var batch = newestBatchForDate(response, dateStr);
+          if (!batch) return;
+          setState(function (s) {
+            if (s.selectedDate !== dateStr) return s;
+            return Object.assign({}, s, { batchStatus: batch, batchError: '' });
+          });
+          if (isBatchLocked(batch)) beginBatchPoll(dateStr, batch.batch_id);
+        })
+        .catch(function (err) {
+          if (selectedDateRef.current !== dateStr) return;
+          setState(function (s) {
+            if (s.selectedDate !== dateStr) return s;
+            return Object.assign({}, s, {
+              batchError: 'Failed to recover batch status: ' + sanitize(String(err.message || err)),
+            });
+          });
+        });
+    }
+
     // Load day metadata, current summary artifacts, and summary-only roll-up.
-    var loadDay = useCallback(function (dateStr) {
+    var loadDay = useCallback(function (dateStr, options) {
       if (!dateStr) return;
+      if (!(options && options.skipBatchDiscovery)) discoverLatestBatch(dateStr);
       setState(function (s) { return Object.assign({}, s, {
         loadingDay: true,
         selectedDate: dateStr,
@@ -1136,6 +1232,7 @@
 
     // Navigation
     var navigatePrev = useCallback(function () {
+      cancelAllBatchPolls();
       setState(function (s) {
         var newMonth = s.viewMonth - 1;
         var newYear = s.viewYear;
@@ -1153,6 +1250,7 @@
     }, [setState]);
 
     var navigateNext = useCallback(function () {
+      cancelAllBatchPolls();
       setState(function (s) {
         var newMonth = s.viewMonth + 1;
         var newYear = s.viewYear;
@@ -1170,6 +1268,7 @@
     }, [setState]);
 
     var navigateToday = useCallback(function () {
+      if (stateVal.selectedDate !== todayStr) cancelAllBatchPolls();
       setState(function (s) {
         var next = {
           viewYear: chicagoNow.year,
@@ -1184,9 +1283,10 @@
         }
         return Object.assign({}, s, next);
       });
-    }, [setState, chicagoNow.year, chicagoNow.month, todayStr]);
+    }, [setState, stateVal.selectedDate, chicagoNow.year, chicagoNow.month, todayStr]);
 
     var handleDayClick = useCallback(function (dateStr) {
+      if (stateVal.selectedDate !== dateStr) cancelAllBatchPolls();
       setState(function (s) {
         // If date is changing, clear selection/regenerate/batch/error
         if (s.selectedDate !== dateStr) {
@@ -1194,7 +1294,7 @@
         }
         return Object.assign({}, s, { selectedDate: dateStr });
       });
-    }, [setState]);
+    }, [setState, stateVal.selectedDate]);
 
     // Batch selection helpers
     var onSelectAllSessions = useCallback(function (dateStr) {
@@ -1246,8 +1346,78 @@
     }, [setState]);
 
     var onSubmitBatch = useCallback(function () {
-      // Safe no-op for C3a internal slice - no API submission yet
-    }, [setState]);
+      var dateStr = stateVal.selectedDate;
+      if (!dateStr || batchSubmitRef.current || isBatchLocked(stateVal.batchStatus)) return;
+      var visibleSessions = stateVal.dayData && Array.isArray(stateVal.dayData.sessions)
+        ? stateVal.dayData.sessions : [];
+      var payload = buildBatchRequest(
+        dateStr,
+        visibleSessions,
+        stateVal.selectedSessions,
+        stateVal.regenerateCurrent
+      );
+      if (!payload.sessions.length) {
+        setState(function (s) {
+          return Object.assign({}, s, { batchError: 'Select at least one session.' });
+        });
+        return;
+      }
+
+      batchSubmitRef.current = true;
+      var queuedMembers = payload.sessions.map(function (session) {
+        return { profile: session.profile, session_id: session.session_id, status: 'queued' };
+      });
+      setState(function (s) {
+        if (s.selectedDate !== dateStr) return s;
+        return Object.assign({}, s, {
+          batchStatus: {
+            status: 'queued',
+            date: dateStr,
+            total: queuedMembers.length,
+            members: queuedMembers,
+          },
+          batchError: '',
+        });
+      });
+
+      apiPost('/session-summary/batch' + encodeUrlParams({ date: dateStr }), payload)
+        .then(function (batch) {
+          batchSubmitRef.current = false;
+          if (!batch || !batch.batch_id || !batch.status) {
+            throw new Error('Batch submission returned an invalid response');
+          }
+          if (selectedDateRef.current !== dateStr) return;
+          setState(function (s) {
+            if (s.selectedDate !== dateStr) return s;
+            return Object.assign({}, s, { batchStatus: batch, batchError: '' });
+          });
+          if (isBatchLocked(batch)) {
+            beginBatchPoll(dateStr, batch.batch_id);
+          } else {
+            loadDay(dateStr, { skipBatchDiscovery: true });
+            var parsed = parseDate(dateStr);
+            loadMonth(parsed.year, parsed.month);
+          }
+        })
+        .catch(function (err) {
+          batchSubmitRef.current = false;
+          if (selectedDateRef.current !== dateStr) return;
+          setState(function (s) {
+            if (s.selectedDate !== dateStr) return s;
+            return Object.assign({}, s, {
+              batchStatus: null,
+              batchError: 'Batch submission failed: ' + sanitize(String(err.message || err)),
+            });
+          });
+        });
+    }, [
+      setState,
+      stateVal.selectedDate,
+      stateVal.dayData,
+      stateVal.selectedSessions,
+      stateVal.regenerateCurrent,
+      stateVal.batchStatus,
+    ]);
 
     // Initial health load. Month data is handled by the navigation effect
     // below so the first render issues exactly one month request.
