@@ -23,8 +23,10 @@ function loadPlugin(options = {}) {
     '    SessionCard: SessionCard,',
     '    BatchToolbar: BatchToolbar,',
     '    DayDetailPanel: DayDetailPanel,',
+    '    MonthGrid: MonthGrid,',
     '    RollupSection: RollupSection,',
     '    CalendarPage: CalendarPage,',
+    '    isBatchLocked: isBatchLocked,',
     '    batchSelectionKey: batchSelectionKey,',
     '    buildBatchRequest: buildBatchRequest,',
     '    summarizeBatchProgress: summarizeBatchProgress,',
@@ -37,6 +39,12 @@ function loadPlugin(options = {}) {
   const instrumented = source.replace(marker, expose + marker);
 
   const captured = { component: null, initialState: null };
+  let statefulValue;
+  let statefulInitialized = false;
+  function applyState(update) {
+    statefulValue = typeof update === 'function' ? update(statefulValue) : update;
+    return statefulValue;
+  }
   const React = {
     Fragment: 'fragment',
     createElement(type, props, ...children) {
@@ -45,8 +53,16 @@ function loadPlugin(options = {}) {
   };
   const hooks = {
     useState(initial) {
-      captured.initialState = initial;
-      return [initial, function noop() {}];
+      if (!options.stateful) {
+        captured.initialState = initial;
+        return [initial, function noop() {}];
+      }
+      if (!statefulInitialized) {
+        captured.initialState = initial;
+        statefulValue = initial;
+        statefulInitialized = true;
+      }
+      return [statefulValue, applyState];
     },
     useEffect() {},
     useCallback(fn) { return fn; },
@@ -81,6 +97,12 @@ function loadPlugin(options = {}) {
     setTimeout: options.setTimeout || setTimeout,
     clearTimeout: options.clearTimeout || clearTimeout,
   }, { filename: file });
+
+  if (options.stateful) {
+    captured.getState = function () { return statefulValue; };
+    captured.replaceState = applyState;
+    captured.render = function () { return captured.component(); };
+  }
 
   return { api: window.__DAILY_LEDGER_TEST__, captured, source };
 }
@@ -117,6 +139,18 @@ function findNodes(node, predicate, out = []) {
   }
   if (predicate(node)) out.push(node);
   if (node.children) findNodes(node.children, predicate, out);
+  return out;
+}
+
+function findRawNodes(node, predicate, out = []) {
+  if (node == null || node === false) return out;
+  if (Array.isArray(node)) {
+    for (const item of node) findRawNodes(item, predicate, out);
+    return out;
+  }
+  if (typeof node !== 'object') return out;
+  if (predicate(node)) out.push(node);
+  if (node.children) findRawNodes(node.children, predicate, out);
   return out;
 }
 
@@ -1224,4 +1258,195 @@ test('DayDetailPanel renders BatchToolbar before session cards', () => {
   // Toolbar should appear before session title
   assert.ok(selectedIdx >= 0 && sessionIdx >= 0);
   assert.ok(selectedIdx < sessionIdx, 'BatchToolbar should render before session cards');
+});
+
+function setupStatefulCalendar() {
+  const loaded = loadPlugin({ stateful: true });
+  loaded.captured.render();
+  return loaded;
+}
+
+function rawCalendarChild(api, captured, type) {
+  const tree = captured.render();
+  const nodes = findRawNodes(tree, (node) => node.type === type);
+  assert.equal(nodes.length, 1);
+  return nodes[0];
+}
+
+function setBatchUiState(captured, overrides = {}) {
+  captured.replaceState(function (state) {
+    return Object.assign({}, state, {
+      loadingDay: false,
+      loadingMonth: false,
+      dayData: { sessions: [], cron_runs: [] },
+    }, overrides);
+  });
+}
+
+test('Calendar state initializes exact batch UI fields', () => {
+  const { captured } = setupStatefulCalendar();
+  const state = captured.getState();
+  assert.deepEqual(Object.keys(state.selectedSessions), []);
+  assert.equal(state.regenerateCurrent, false);
+  assert.equal(state.batchStatus, null);
+  assert.equal(state.batchError, '');
+});
+
+test('Calendar callbacks select and deselect exact composite session identities', () => {
+  const { api, captured } = setupStatefulCalendar();
+  const first = { profile: 'default', session_id: 'one', title: 'Same title' };
+  const second = { profile: 'other', session_id: 'two', title: 'Same title' };
+  setBatchUiState(captured, { dayData: { sessions: [first, second], cron_runs: [] } });
+
+  let panel = rawCalendarChild(api, captured, api.DayDetailPanel);
+  panel.props.onSelectSession(first);
+  panel = rawCalendarChild(api, captured, api.DayDetailPanel);
+  panel.props.onSelectSession(second);
+
+  const firstKey = api.batchSelectionKey(captured.getState().selectedDate, first);
+  const secondKey = api.batchSelectionKey(captured.getState().selectedDate, second);
+  assert.deepEqual(Object.keys(captured.getState().selectedSessions).sort(), [firstKey, secondKey].sort());
+
+  panel = rawCalendarChild(api, captured, api.DayDetailPanel);
+  panel.props.onDeselectSession(first);
+  assert.deepEqual(Object.keys(captured.getState().selectedSessions), [secondKey]);
+});
+
+test('Calendar select all uses sessions only and clear empties selection', () => {
+  const { api, captured } = setupStatefulCalendar();
+  const sessions = [
+    { profile: 'default', session_id: 'one' },
+    { profile: 'other', session_id: 'two' },
+  ];
+  const cron = { profile: 'default', job_id: 'cron-only', job_name: 'Cron' };
+  setBatchUiState(captured, { dayData: { sessions, cron_runs: [cron] } });
+
+  let panel = rawCalendarChild(api, captured, api.DayDetailPanel);
+  panel.props.onSelectAll();
+  const keys = Object.keys(captured.getState().selectedSessions);
+  assert.equal(keys.length, 2);
+  assert.deepEqual(keys.sort(), sessions.map((session) =>
+    api.batchSelectionKey(captured.getState().selectedDate, session)).sort());
+  assert.doesNotMatch(keys.join(' '), /cron-only/);
+
+  panel = rawCalendarChild(api, captured, api.DayDetailPanel);
+  panel.props.onClear();
+  assert.deepEqual(Object.keys(captured.getState().selectedSessions), []);
+});
+
+test('Calendar regenerate callback updates real state', () => {
+  const { api, captured } = setupStatefulCalendar();
+  setBatchUiState(captured);
+  let panel = rawCalendarChild(api, captured, api.DayDetailPanel);
+  panel.props.onToggleRegenerate(true);
+  assert.equal(captured.getState().regenerateCurrent, true);
+  panel = rawCalendarChild(api, captured, api.DayDetailPanel);
+  panel.props.onToggleRegenerate(false);
+  assert.equal(captured.getState().regenerateCurrent, false);
+});
+
+test('queued and running batches lock every selection mutation', () => {
+  for (const status of ['queued', 'running']) {
+    const { api, captured } = setupStatefulCalendar();
+    const existing = { profile: 'default', session_id: 'existing' };
+    const added = { profile: 'default', session_id: 'added' };
+    const date = captured.getState().selectedDate;
+    const existingKey = api.batchSelectionKey(date, existing);
+    setBatchUiState(captured, {
+      dayData: { sessions: [existing, added], cron_runs: [] },
+      selectedSessions: { [existingKey]: true },
+      regenerateCurrent: false,
+      batchStatus: { status },
+      batchError: 'held',
+    });
+    const before = JSON.stringify(captured.getState());
+    const panel = rawCalendarChild(api, captured, api.DayDetailPanel);
+    panel.props.onSelectSession(added);
+    panel.props.onDeselectSession(existing);
+    panel.props.onSelectAll();
+    panel.props.onClear();
+    panel.props.onToggleRegenerate(true);
+    assert.equal(JSON.stringify(captured.getState()), before);
+  }
+});
+
+test('same date preserves batch UI state and a different date clears it', () => {
+  const { api, captured } = setupStatefulCalendar();
+  const selectedDate = captured.getState().selectedDate;
+  setBatchUiState(captured, {
+    selectedDate,
+    selectedSessions: { keep: true },
+    regenerateCurrent: true,
+    batchStatus: { status: 'completed' },
+    batchError: 'visible',
+  });
+
+  let grid = rawCalendarChild(api, captured, api.MonthGrid);
+  grid.props.onDayClick(selectedDate);
+  assert.deepEqual(Object.keys(captured.getState().selectedSessions), ['keep']);
+  assert.equal(captured.getState().regenerateCurrent, true);
+  assert.equal(captured.getState().batchError, 'visible');
+
+  grid = rawCalendarChild(api, captured, api.MonthGrid);
+  grid.props.onDayClick('2026-01-02');
+  const changed = captured.getState();
+  assert.equal(changed.selectedDate, '2026-01-02');
+  assert.deepEqual(Object.keys(changed.selectedSessions), []);
+  assert.equal(changed.regenerateCurrent, false);
+  assert.equal(changed.batchStatus, null);
+  assert.equal(changed.batchError, '');
+});
+
+test('previous and next month navigation clear batch UI state', () => {
+  for (const label of ['Previous month', 'Next month']) {
+    const { captured } = setupStatefulCalendar();
+    setBatchUiState(captured, {
+      selectedSessions: { selected: true },
+      regenerateCurrent: true,
+      batchStatus: { status: 'completed' },
+      batchError: 'visible',
+    });
+    const tree = captured.render();
+    const button = findRawNodes(tree, (node) =>
+      node.type === 'button' && node.props['aria-label'] === label)[0];
+    assert.ok(button);
+    button.props.onClick();
+    const state = captured.getState();
+    assert.equal(state.selectedDate, null);
+    assert.deepEqual(Object.keys(state.selectedSessions), []);
+    assert.equal(state.regenerateCurrent, false);
+    assert.equal(state.batchStatus, null);
+    assert.equal(state.batchError, '');
+  }
+});
+
+test('Today preserves same-date batch UI state and clears it when changing dates', () => {
+  const { captured } = setupStatefulCalendar();
+  const today = captured.getState().selectedDate;
+  const retained = {
+    selectedSessions: { selected: true },
+    regenerateCurrent: true,
+    batchStatus: { status: 'completed' },
+    batchError: 'visible',
+  };
+  setBatchUiState(captured, Object.assign({ selectedDate: today }, retained));
+  let tree = captured.render();
+  let button = findRawNodes(tree, (node) =>
+    node.type === 'button' && node.props['aria-label'] === 'Go to current month')[0];
+  button.props.onClick();
+  assert.deepEqual(Object.keys(captured.getState().selectedSessions), ['selected']);
+  assert.equal(captured.getState().regenerateCurrent, true);
+  assert.equal(captured.getState().batchError, 'visible');
+
+  setBatchUiState(captured, Object.assign({ selectedDate: '2026-01-02' }, retained));
+  tree = captured.render();
+  button = findRawNodes(tree, (node) =>
+    node.type === 'button' && node.props['aria-label'] === 'Go to current month')[0];
+  button.props.onClick();
+  const changed = captured.getState();
+  assert.equal(changed.selectedDate, today);
+  assert.deepEqual(Object.keys(changed.selectedSessions), []);
+  assert.equal(changed.regenerateCurrent, false);
+  assert.equal(changed.batchStatus, null);
+  assert.equal(changed.batchError, '');
 });

@@ -1140,7 +1140,15 @@
         var newMonth = s.viewMonth - 1;
         var newYear = s.viewYear;
         if (newMonth < 0) { newMonth = 11; newYear--; }
-        return Object.assign({}, s, { viewMonth: newMonth, viewYear: newYear, selectedDate: null });
+        return Object.assign({}, s, {
+          viewMonth: newMonth,
+          viewYear: newYear,
+          selectedDate: null,
+          selectedSessions: {},
+          regenerateCurrent: false,
+          batchStatus: null,
+          batchError: '',
+        });
       });
     }, [setState]);
 
@@ -1149,13 +1157,32 @@
         var newMonth = s.viewMonth + 1;
         var newYear = s.viewYear;
         if (newMonth > 11) { newMonth = 0; newYear++; }
-        return Object.assign({}, s, { viewMonth: newMonth, viewYear: newYear, selectedDate: null });
+        return Object.assign({}, s, {
+          viewMonth: newMonth,
+          viewYear: newYear,
+          selectedDate: null,
+          selectedSessions: {},
+          regenerateCurrent: false,
+          batchStatus: null,
+          batchError: '',
+        });
       });
     }, [setState]);
 
     var navigateToday = useCallback(function () {
       setState(function (s) {
-        return Object.assign({}, s, { viewYear: chicagoNow.year, viewMonth: chicagoNow.month, selectedDate: todayStr });
+        var next = {
+          viewYear: chicagoNow.year,
+          viewMonth: chicagoNow.month,
+          selectedDate: todayStr,
+        };
+        if (s.selectedDate !== todayStr) {
+          next.selectedSessions = {};
+          next.regenerateCurrent = false;
+          next.batchStatus = null;
+          next.batchError = '';
+        }
+        return Object.assign({}, s, next);
       });
     }, [setState, chicagoNow.year, chicagoNow.month, todayStr]);
 
