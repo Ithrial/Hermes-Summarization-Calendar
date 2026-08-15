@@ -18,9 +18,10 @@
 set -euo pipefail
 
 HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
-PLUGIN_DIR="$HERMES_HOME/plugins/daily-ledger"
-BACKUP_ROOT="$HERMES_HOME/backups/daily-ledger-install"
-LEDGER_DIR="$HERMES_HOME/daily-ledger"
+PLUGIN_DIR="$HERMES_HOME/plugins/summarization-calendar"
+BACKUP_ROOT="$HERMES_HOME/backups/summarization-calendar-install"
+LEGACY_BACKUP_ROOT="$HERMES_HOME/backups/daily-ledger-install"
+LEDGER_DIR="$HERMES_HOME/summarization-calendar"
 
 ts() { date -u '+%Y%m%dT%H%M%SZ'; }
 iso_ts() { date -u '+%Y-%m-%dT%H:%M:%S%z'; }
@@ -107,15 +108,20 @@ with open(sys.argv[8], 'w') as f:
     echo "Current state archived to: $dest"
 }
 
-echo "=== Daily Ledger Plugin Rollback ==="
+echo "=== Summarization Calendar Plugin Rollback ==="
 
 # List available backups if none specified
 if [ $# -lt 1 ]; then
     echo "Usage: $0 <backup_id>"
     echo ""
     echo "Available backups:"
-    if [ -d "$BACKUP_ROOT" ]; then
-        for d in "$BACKUP_ROOT"/*/; do
+    LISTED_ANY=false
+    for root in "$BACKUP_ROOT" "$LEGACY_BACKUP_ROOT"; do
+        [ -d "$root" ] || continue
+        if [ "$root" = "$LEGACY_BACKUP_ROOT" ]; then
+            echo "  (legacy pre-rename backup root: $root)"
+        fi
+        for d in "$root"/*/; do
             [ -d "$d" ] || continue
             manifest="$d/manifest.json"
             if [ -f "$manifest" ]; then
@@ -123,9 +129,11 @@ if [ $# -lt 1 ]; then
                 prev_type="$(read_manifest_field "$manifest" "previous_type" "?")"
                 created="$(read_manifest_field "$manifest" "created_at" "?")"
                 echo "  $id  (type=$prev_type, created=$created)"
+                LISTED_ANY=true
             fi
         done
-    else
+    done
+    if [ "$LISTED_ANY" = false ]; then
         echo "  (none — no backups found)"
     fi
     exit 1
@@ -134,22 +142,35 @@ fi
 BACKUP_ID="$1"
 
 # Validate BACKUP_ID against traversal/separators
-if [[ "$BACKUP_ID" == *"/"* ]] || [[ "$BACKUP_ID" == *".."* ]]; then
+if [[ "$BACKUP_ID" == *"/"* ]] || [[ "$BACKUP_ID" == *..* ]]; then
     die "Invalid backup ID: contains path separators or traversal sequences"
 fi
 
-BACKUP_PATH="$BACKUP_ROOT/$BACKUP_ID"
+# Locate the backup. The new root wins on identical IDs; v1.1.0-and-earlier
+# backups live under the legacy pre-rename root and remain restorable.
+BACKUP_PATH=""
+for root in "$BACKUP_ROOT" "$LEGACY_BACKUP_ROOT"; do
+    candidate="$root/$BACKUP_ID"
+    if [ -d "$candidate" ]; then
+        BACKUP_PATH="$candidate"
+        break
+    fi
+done
 
-# Ensure target stays directly below BACKUP_ROOT (no traversal)
+if [ -z "$BACKUP_PATH" ]; then
+    die "Backup $BACKUP_ID not found in $BACKUP_ROOT or $LEGACY_BACKUP_ROOT"
+fi
+if [ -d "$LEGACY_BACKUP_ROOT" ] && [[ "$BACKUP_PATH" == "$LEGACY_BACKUP_ROOT"/* ]]; then
+    echo "NOTE: restoring from legacy pre-rename backup root ($LEGACY_BACKUP_ROOT)" >&2
+fi
+BACKUP_ROOT_RESOLVED="$(dirname -- "$BACKUP_PATH")"
+
+# Ensure target stays directly below its backup root (no traversal)
 RESOLVED_BACKUP="$(cd -P "$BACKUP_PATH" 2>/dev/null && pwd)" || true
 case "$RESOLVED_BACKUP" in
-    "$BACKUP_ROOT"/*) : ;; # OK — direct child
-    *) die "Backup resolves outside BACKUP_ROOT: $RESOLVED_BACKUP" ;;
+    "$BACKUP_ROOT_RESOLVED"/*) : ;; # OK — direct child
+    *) die "Backup resolves outside its backup root: $RESOLVED_BACKUP" ;;
 esac
-
-if [ ! -d "$BACKUP_PATH" ]; then
-    die "Backup $BACKUP_ID not found at $BACKUP_PATH"
-fi
 
 # Validate HERMES_HOME/PLUGIN_DIR safety
 validate_path_safety "$HERMES_HOME" "HERMES_HOME"
@@ -184,8 +205,8 @@ fi
 # Build the restore candidate at a sibling path before touching current.
 PLUGIN_PARENT="$(dirname "$PLUGIN_DIR")"
 mkdir -p "$PLUGIN_PARENT"
-RESTORE_STAGE="$PLUGIN_PARENT/.daily-ledger-restore-stage-$$"
-OLD="$PLUGIN_PARENT/.daily-ledger-restore-old-$$"
+RESTORE_STAGE="$PLUGIN_PARENT/.summarization-calendar-restore-stage-$$"
+OLD="$PLUGIN_PARENT/.summarization-calendar-restore-old-$$"
 rm -rf -- "$RESTORE_STAGE" "$OLD"
 # Never remove OLD from an EXIT trap: it is the recovery handle if both the
 # staged swap and automatic restoration fail.

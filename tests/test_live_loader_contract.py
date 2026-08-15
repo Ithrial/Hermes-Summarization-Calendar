@@ -20,7 +20,7 @@ def test_plugin_api_imports_by_file_path_without_dashboard_on_sys_path(tmp_path:
         import sys
 
         api_path = Path(sys.argv[1])
-        module_name = "hermes_dashboard_plugin_daily-ledger"
+        module_name = "hermes_dashboard_plugin_summarization-calendar"
         spec = importlib.util.spec_from_file_location(module_name, api_path)
         assert spec is not None and spec.loader is not None
         module = importlib.util.module_from_spec(spec)

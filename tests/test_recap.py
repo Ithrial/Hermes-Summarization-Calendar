@@ -27,7 +27,7 @@ import pytest
 # --- Transcript collection tests ---
 
 try:
-    from hermes_daily_ledger.transcript import (
+    from hermes_summarization_calendar.transcript import (
         TranscriptMessage,
         SessionTranscript,
         collect_session_transcript,
@@ -39,7 +39,7 @@ except ImportError:
     HAS_TRANSCRIPT = False
 
 try:
-    from hermes_daily_ledger.chunker import (
+    from hermes_summarization_calendar.chunker import (
         ChunkInfo,
         chunk_transcripts,
         build_synthesis_prompt,
@@ -51,7 +51,7 @@ except ImportError:
     HAS_CHUNKER = False
 
 try:
-    from hermes_daily_ledger.auxiliary_runner import (
+    from hermes_summarization_calendar.auxiliary_runner import (
         AuxiliaryResult,
         _extract_message_content,
         _sanitize_error,
@@ -61,7 +61,7 @@ except ImportError:
     HAS_AUXILIARY = False
 
 try:
-    from hermes_daily_ledger.recap_validator import (
+    from hermes_summarization_calendar.recap_validator import (
         SessionIdentity,
         validate_summary_output,
         ValidationReport,
@@ -73,7 +73,7 @@ except ImportError:
     HAS_VALIDATOR = False
 
 try:
-    from hermes_daily_ledger.recap_storage import (
+    from hermes_summarization_calendar.recap_storage import (
         save_recap,
         load_recap,
         load_recap_markdown,
@@ -89,7 +89,7 @@ except ImportError:
     HAS_STORAGE = False
 
 try:
-    from hermes_daily_ledger.concurrency import (
+    from hermes_summarization_calendar.concurrency import (
         acquire_generation_slot,
         complete_generation,
         fail_generation,
@@ -104,7 +104,7 @@ try:
 except ImportError:
     HAS_CONCURRENCY = False
 
-from hermes_daily_ledger.dates import chicago_day_window_utc
+from hermes_summarization_calendar.dates import chicago_day_window_utc
 
 
 # ====================================================================
@@ -160,12 +160,22 @@ def transcript_db(tmp_path) -> Path:
 
     # Daily-ledger session - should be excluded entirely
     conn.execute(
-        "INSERT INTO sessions VALUES ('dl1', 'daily-ledger', 'model', 'Daily recap', "
+        "INSERT INTO sessions VALUES ('dl1', 'summarization-calendar', 'model', 'Daily recap', "
         "1772964000.0, NULL, 'secondary', 1, 0)"
     )
     conn.execute(
         "INSERT INTO messages (session_id, role, content, timestamp, active) VALUES "
         "('dl1', 'user', 'generate recap', 1772964000.0, 1)"
+    )
+
+    # Legacy v1.1.0 plugin session (source='daily-ledger') - also excluded
+    conn.execute(
+        "INSERT INTO sessions VALUES ('dl2', 'daily-ledger', 'model', 'Legacy recap', "
+        "1772964000.0, NULL, 'secondary', 1, 0)"
+    )
+    conn.execute(
+        "INSERT INTO messages (session_id, role, content, timestamp, active) VALUES "
+        "('dl2', 'user', 'generate legacy recap', 1772964000.0, 1)"
     )
 
     # Session with prompt injection attempt in content
@@ -222,7 +232,18 @@ class TestTranscriptCollection:
             start_dt.timestamp(), end_dt.timestamp(),
         )
 
-        assert result is None, "daily-ledger sessions must return None"
+        assert result is None, "summarization-calendar sessions must return None"
+
+    def test_excludes_legacy_daily_ledger_sessions(self, transcript_db):
+        """Pre-rename plugin sessions tagged 'daily-ledger' must also return None."""
+        start_dt, end_dt = chicago_day_window_utc("2026-03-08")
+
+        result = collect_session_transcript(
+            transcript_db, "dl2", "secondary",
+            start_dt.timestamp(), end_dt.timestamp(),
+        )
+
+        assert result is None, "legacy daily-ledger sessions must return None"
 
     def test_includes_injection_content_as_data(self, transcript_db):
         """Content with LEDGER_JSON markers should be collected but treated as data."""
@@ -261,8 +282,10 @@ class TestTranscriptCollection:
         session_ids = {t.session_id for t in transcripts}
         assert "t1" in session_ids
         assert "inj1" in session_ids
-        # daily-ledger session excluded
+        # summarization-calendar session excluded
         assert "dl1" not in session_ids
+        # legacy daily-ledger session (pre-rename) also excluded
+        assert "dl2" not in session_ids
 
 
 # ====================================================================
@@ -277,7 +300,7 @@ class TestChunking:
         Uses a dataclass-style class to avoid closure scope issues with
         class bodies inside list comprehensions.
         """
-        from hermes_daily_ledger.transcript import TranscriptMessage
+        from hermes_summarization_calendar.transcript import TranscriptMessage
 
         messages = [
             TranscriptMessage(
@@ -375,7 +398,7 @@ class TestChunking:
     def test_single_session_exceeding_ceiling_raises(self):
         """A single massive session should raise ValueError."""
         # Create a transcript with huge content
-        from hermes_daily_ledger.transcript import TranscriptMessage
+        from hermes_summarization_calendar.transcript import TranscriptMessage
 
         class HugeTranscript:
             session_id = "huge"
@@ -658,6 +681,87 @@ class TestRecapStorage:
         yield root
         del os.environ["LEDGER_ROOT"]
 
+    # --- get_ledger_root legacy-data fallback (v1.2.0 rename back-compat) ---
+    # Isolated from the real home: monkeypatch the module root constants so
+    # no test can read or write ~/.hermes.
+
+    @pytest.fixture
+    def root_paths(self, tmp_path, monkeypatch):
+        import hermes_summarization_calendar.recap_storage as storage
+        new_root = tmp_path / "summarization-calendar"
+        legacy_root = tmp_path / "daily-ledger"
+        monkeypatch.setattr(storage, "DEFAULT_LEDGER_ROOT", new_root)
+        monkeypatch.setattr(storage, "LEGACY_LEDGER_ROOT", legacy_root)
+        monkeypatch.delenv("LEDGER_ROOT", raising=False)
+        return new_root, legacy_root
+
+    def _seed_data(self, root):
+        recaps = root / "recaps" / "2026-03-08"
+        recaps.mkdir(parents=True)
+        (recaps / "meta.json").write_text("{}", encoding="utf-8")
+
+    def test_root_falls_back_to_legacy_when_new_is_empty(self, root_paths):
+        import hermes_summarization_calendar.recap_storage as storage
+        new_root, legacy_root = root_paths
+        self._seed_data(legacy_root)
+        # Upgrade from v1.1.0: pre-rename store is followed in place.
+        assert storage.get_ledger_root() == legacy_root.resolve()
+
+    def test_root_prefers_new_when_new_has_data(self, root_paths):
+        import hermes_summarization_calendar.recap_storage as storage
+        new_root, legacy_root = root_paths
+        self._seed_data(new_root)
+        assert storage.get_ledger_root() == new_root.resolve()
+
+    def test_root_prefers_new_when_both_have_data(self, root_paths):
+        import hermes_summarization_calendar.recap_storage as storage
+        new_root, legacy_root = root_paths
+        self._seed_data(new_root)
+        self._seed_data(legacy_root)
+        # No split-brain: the active (new) store wins.
+        assert storage.get_ledger_root() == new_root.resolve()
+
+    def test_root_defaults_to_new_when_neither_has_data(self, root_paths):
+        import hermes_summarization_calendar.recap_storage as storage
+        new_root, legacy_root = root_paths
+        # Fresh install: empty scaffold dirs do not count as data.
+        (new_root / "recaps").mkdir(parents=True)
+        (legacy_root / "recaps").mkdir(parents=True)
+        assert storage.get_ledger_root() == new_root.resolve()
+
+    def test_env_override_wins_over_data_detection(self, root_paths, tmp_path, monkeypatch):
+        import hermes_summarization_calendar.recap_storage as storage
+        new_root, legacy_root = root_paths
+        self._seed_data(legacy_root)
+        override = tmp_path / "explicit-root"
+        override.mkdir()
+        monkeypatch.setenv("LEDGER_ROOT", str(override))
+        assert storage.get_ledger_root() == override.resolve()
+
+    def test_legacy_recap_readable_after_fallback(self, root_paths):
+        import hermes_summarization_calendar.recap_storage as storage
+        new_root, legacy_root = root_paths
+        data = {
+            "session_summaries": [
+                {"session_id": "old1", "title": "Old session", "summary": "pre-rename work"},
+            ],
+            "overall_recap": "One pre-rename session.",
+        }
+        save_recap(
+            date="2026-03-08",
+            data=data,
+            source_fingerprint="sha256:legacy",
+            generated_at="2026-03-08T12:00:00Z",
+            ledger_root=legacy_root,
+        )
+        # After the rename, default resolution lands on the legacy store.
+        root = storage.get_ledger_root()
+        assert root == legacy_root.resolve()
+        raw, meta = storage.load_recap("2026-03-08")
+        assert raw is not None
+        assert raw["session_summaries"][0]["session_id"] == "old1"
+        assert meta["source_fingerprint"] == "sha256:legacy"
+
     def test_save_and_load_recap(self, ledger_root):
         data = {
             "session_summaries": [
@@ -776,7 +880,7 @@ class TestRecapStorage:
 
         md = load_recap_markdown("2026-03-08", ledger_root)
         assert md is not None
-        assert "# Daily Ledger Recap" in md
+        assert "# Summarization Calendar Recap" in md
         assert "Test recap" in md
 
     def test_atomic_write_preserves_on_failure(self, ledger_root):
@@ -794,7 +898,7 @@ class TestRecapStorage:
         assert raw_before["overall_recap"] == "Original"
 
         # Simulate a failure during save by injecting an exception
-        with patch("hermes_daily_ledger.recap_storage.os.rename") as mock_rename:
+        with patch("hermes_summarization_calendar.recap_storage.os.rename") as mock_rename:
             mock_rename.side_effect = OSError("Disk full")
             try:
                 save_recap(
@@ -854,7 +958,7 @@ class TestConcurrency:
     def test_acquire_and_release(self, ledger_root):
         """Acquire a slot, then release it, then acquire again."""
         # Clear in-memory locks from previous tests
-        import hermes_daily_ledger.concurrency as conc_mod
+        import hermes_summarization_calendar.concurrency as conc_mod
         with conc_mod._lock_registry_lock:
             conc_mod._locks.clear()
 
@@ -866,7 +970,7 @@ class TestConcurrency:
 
     def test_concurrent_acquisition_rejected(self, ledger_root):
         """Second acquisition for same date should fail while first holds lock."""
-        import hermes_daily_ledger.concurrency as conc_mod
+        import hermes_summarization_calendar.concurrency as conc_mod
         with conc_mod._lock_registry_lock:
             conc_mod._locks.clear()
 
@@ -904,7 +1008,7 @@ class TestConcurrency:
 
     def test_stale_lock_recovery(self, ledger_root):
         # Simulate a stale running status
-        from hermes_daily_ledger.concurrency import get_ledger_running_dir
+        from hermes_summarization_calendar.concurrency import get_ledger_running_dir
         import json as _json
 
         running_dir = get_ledger_running_dir(ledger_root)
@@ -963,7 +1067,7 @@ class TestRecapEndpoints:
     def _isolate_background_workers(self, monkeypatch):
         """Keep API contract tests from launching real recap/model workers."""
         import plugin_api
-        import hermes_daily_ledger.concurrency as conc_mod
+        import hermes_summarization_calendar.concurrency as conc_mod
 
         class PendingThread:
             def __init__(self, *, target, args=(), kwargs=None, **_other):
@@ -1000,60 +1104,60 @@ class TestRecapEndpoints:
             os.environ["LEDGER_ROOT"] = str(ledger_root)
 
         app = FastAPI()
-        app.include_router(plugin_api.router, prefix="/api/plugins/daily-ledger")
+        app.include_router(plugin_api.router, prefix="/api/plugins/summarization-calendar")
         return TestClient(app)
 
     def test_get_recap_not_found(self, empty_hermes_home, tmp_path):
         ledger = tmp_path / "ledger"
         client = self._app(empty_hermes_home, ledger)
 
-        resp = client.get("/api/plugins/daily-ledger/recap?date=2026-03-08")
+        resp = client.get("/api/plugins/summarization-calendar/recap?date=2026-03-08")
         assert resp.status_code == 200
         data = resp.json()
         assert data["exists"] is False
 
     def test_post_recap_no_activity(self, empty_hermes_home, tmp_path):
         """POST /recap on a day with no sessions should queue (202) then fail in background."""
-        import hermes_daily_ledger.concurrency as conc_mod
+        import hermes_summarization_calendar.concurrency as conc_mod
         with conc_mod._lock_registry_lock:
             conc_mod._locks.clear()
 
         ledger = tmp_path / "ledger"
         client = self._app(empty_hermes_home, ledger)
 
-        resp = client.post("/api/plugins/daily-ledger/recap?date=2026-03-08")
+        resp = client.post("/api/plugins/summarization-calendar/recap?date=2026-03-08")
         assert resp.status_code == 202
         data = resp.json()
         assert data["status"] == "queued"
 
     def test_post_recap_concurrent_rejected(self, test_hermes_home, tmp_path):
         """Concurrent POST /recap for same date should return 409."""
-        import hermes_daily_ledger.concurrency as conc_mod
+        import hermes_summarization_calendar.concurrency as conc_mod
         with conc_mod._lock_registry_lock:
             conc_mod._locks.clear()
 
         ledger = tmp_path / "ledger"
         client = self._app(test_hermes_home[0], ledger)
 
-        resp1 = client.post("/api/plugins/daily-ledger/recap?date=2026-03-08")
+        resp1 = client.post("/api/plugins/summarization-calendar/recap?date=2026-03-08")
         assert resp1.status_code == 202, f"Expected 202, got {resp1.status_code}"
 
         # Second request should be rejected (slot still held)
-        resp2 = client.post("/api/plugins/daily-ledger/recap?date=2026-03-08")
+        resp2 = client.post("/api/plugins/summarization-calendar/recap?date=2026-03-08")
         assert resp2.status_code == 409, f"Expected 409, got {resp2.status_code}"
 
     def test_get_recap_invalid_date(self, empty_hermes_home, tmp_path):
         ledger = tmp_path / "ledger"
         client = self._app(empty_hermes_home, ledger)
 
-        resp = client.get("/api/plugins/daily-ledger/recap?date=bad-date")
+        resp = client.get("/api/plugins/summarization-calendar/recap?date=bad-date")
         assert resp.status_code == 400
 
     def test_get_recap_versions_empty(self, empty_hermes_home, tmp_path):
         ledger = tmp_path / "ledger"
         client = self._app(empty_hermes_home, ledger)
 
-        resp = client.get("/api/plugins/daily-ledger/recap/versions?date=2026-03-08")
+        resp = client.get("/api/plugins/summarization-calendar/recap/versions?date=2026-03-08")
         assert resp.status_code == 200
         data = resp.json()
         assert data["date"] == "2026-03-08"
@@ -1064,7 +1168,7 @@ class TestRecapEndpoints:
         client = self._app(empty_hermes_home, ledger)
 
         resp = client.post(
-            "/api/plugins/daily-ledger/recap/rollback?date=2026-03-08&version=bad-version"
+            "/api/plugins/summarization-calendar/recap/rollback?date=2026-03-08&version=bad-version"
         )
         assert resp.status_code == 400
 
@@ -1073,7 +1177,7 @@ class TestRecapEndpoints:
         client = self._app(empty_hermes_home, ledger)
 
         resp = client.post(
-            "/api/plugins/daily-ledger/recap/rollback?date=2026-03-08&version=20260701T120000Z"
+            "/api/plugins/summarization-calendar/recap/rollback?date=2026-03-08&version=20260701T120000Z"
         )
         assert resp.status_code == 404
 
@@ -1082,7 +1186,7 @@ class TestRecapEndpoints:
         ledger = tmp_path / "ledger"
         client = self._app(test_hermes_home[0], ledger)
 
-        resp = client.get("/api/plugins/daily-ledger/month?year=2026&month=3")
+        resp = client.get("/api/plugins/summarization-calendar/month?year=2026&month=3")
         assert resp.status_code == 200
         data = resp.json()
         for cell in data["days"]:
@@ -1095,7 +1199,7 @@ class TestRecapEndpoints:
         client = self._app(test_hermes_home[0], ledger)
 
         # First create a recap via storage directly
-        from hermes_daily_ledger.recap_storage import save_recap
+        from hermes_summarization_calendar.recap_storage import save_recap
         save_recap(
             "2026-03-08",
             {"session_summaries": [{"session_id": "s1", "title": "T", "summary": "S"}],
@@ -1104,7 +1208,7 @@ class TestRecapEndpoints:
             ledger_root=ledger,
         )
 
-        resp = client.post("/api/plugins/daily-ledger/recap?date=2026-03-08")
+        resp = client.post("/api/plugins/summarization-calendar/recap?date=2026-03-08")
         assert resp.status_code == 400
         data = resp.json()
         assert "recap_already_exists" in str(data)
@@ -1142,7 +1246,7 @@ class TestInstallerScripts:
     def test_install_creates_backup_with_manifest(self, tmp_path):
         """Simulate install with pre-existing directory -> creates backup with manifest."""
         hermes_home = tmp_path / ".hermes"
-        plugin_dir = hermes_home / "plugins" / "daily-ledger"
+        plugin_dir = hermes_home / "plugins" / "summarization-calendar"
         plugin_dir.mkdir(parents=True)
         (plugin_dir / "old_file.txt").write_text("old content")
 
@@ -1160,7 +1264,7 @@ class TestInstallerScripts:
         )
 
         # Check backup was created with manifest
-        backup_root = hermes_home / "backups" / "daily-ledger-install"
+        backup_root = hermes_home / "backups" / "summarization-calendar-install"
         assert backup_root.exists()
 
         manifests = list(backup_root.glob("*/manifest.json"))
@@ -1186,7 +1290,7 @@ class TestInstallerScripts:
             cwd=str(src_dir),
         )
 
-        plugin_link = hermes_home / "plugins" / "daily-ledger"
+        plugin_link = hermes_home / "plugins" / "summarization-calendar"
         assert plugin_link.is_symlink()
 
     def test_install_ledger_dirs_created(self, tmp_path):
@@ -1205,18 +1309,18 @@ class TestInstallerScripts:
             cwd=str(src_dir),
         )
 
-        ledger = hermes_home / "daily-ledger"
+        ledger = hermes_home / "summarization-calendar"
         assert (ledger / "recaps").is_dir()
         assert (ledger / "versions").is_dir()
         assert (ledger / "running").is_dir()
 
     def test_uninstall_preserves_ledger_data(self, tmp_path):
-        """Default uninstall keeps ~/.hermes/daily-ledger intact."""
+        """Default uninstall keeps ~/.hermes/summarization-calendar intact."""
         hermes_home = tmp_path / ".hermes"
-        plugin_dir = hermes_home / "plugins" / "daily-ledger"
+        plugin_dir = hermes_home / "plugins" / "summarization-calendar"
         plugin_dir.mkdir(parents=True)
 
-        ledger = hermes_home / "daily-ledger"
+        ledger = hermes_home / "summarization-calendar"
         (ledger / "recaps").mkdir(parents=True)
         (ledger / "recaps" / "2026-03-08").mkdir()
         (ledger / "recaps" / "2026-03-08" / "meta.json").write_text(
@@ -1241,10 +1345,10 @@ class TestInstallerScripts:
     def test_uninstall_removes_data_when_flagged(self, tmp_path):
         """--remove-data flag deletes ledger directory."""
         hermes_home = tmp_path / ".hermes"
-        plugin_dir = hermes_home / "plugins" / "daily-ledger"
+        plugin_dir = hermes_home / "plugins" / "summarization-calendar"
         plugin_dir.mkdir(parents=True)
 
-        ledger = hermes_home / "daily-ledger"
+        ledger = hermes_home / "summarization-calendar"
         (ledger / "recaps").mkdir(parents=True)
 
         src_dir = tmp_path / "src"
@@ -1265,7 +1369,7 @@ class TestInstallerScripts:
     def test_rollback_restores_previous_version(self, tmp_path):
         """Rollback restores the exact previous backup from manifest+payload layout."""
         hermes_home = tmp_path / ".hermes"
-        backup_root = hermes_home / "backups" / "daily-ledger-install"
+        backup_root = hermes_home / "backups" / "summarization-calendar-install"
 
         # Create a backup with known content using new manifest+payload layout
         backup_id = "20260308T120000Z-12345"
@@ -1283,7 +1387,7 @@ class TestInstallerScripts:
         }))
 
         # Create current plugin (different content)
-        plugin_dir = hermes_home / "plugins" / "daily-ledger"
+        plugin_dir = hermes_home / "plugins" / "summarization-calendar"
         plugin_dir.mkdir(parents=True)
         (plugin_dir / "current_file.txt").write_text("current content")
 
@@ -1303,6 +1407,109 @@ class TestInstallerScripts:
         assert (plugin_dir / "old_file.txt").exists()
         assert (plugin_dir / "old_file.txt").read_text() == "restored content"
 
+    # --- v1.2.0 rename back-compat: legacy install migration ---
+
+    def test_install_migrates_legacy_plugin_install(self, tmp_path):
+        """A pre-rename plugins/daily-ledger install is snapshotted + moved
+        aside; ledger data at the legacy root is left untouched."""
+        hermes_home = tmp_path / ".hermes"
+        legacy_plugin = hermes_home / "plugins" / "daily-ledger"
+        legacy_plugin.mkdir(parents=True)
+        (legacy_plugin / "old_manifest.json").write_text('{"name": "daily-ledger"}')
+
+        # Pre-rename ledger data must survive the migration untouched.
+        legacy_ledger = hermes_home / "daily-ledger" / "recaps" / "2026-03-08"
+        legacy_ledger.mkdir(parents=True)
+        (legacy_ledger / "meta.json").write_text('{"date": "2026-03-08"}')
+
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        (src_dir / "new_file.py").write_text("print('hello')")
+
+        result = subprocess.run(
+            [str(Path(__file__).parent.parent / "scripts" / "install-local.sh"), "--copy"],
+            env={**os.environ, "HERMES_HOME": str(hermes_home)},
+            capture_output=True,
+            text=True,
+            cwd=str(src_dir),
+        )
+        assert result.returncode == 0, f"Install failed: {result.stderr}\n{result.stdout}"
+
+        # Legacy install removed; new install present (script installs its own
+        # source tree — assert on a file that exists there).
+        assert not legacy_plugin.exists(), "legacy plugin install must be migrated away"
+        plugin_dir = hermes_home / "plugins" / "summarization-calendar"
+        assert plugin_dir.is_dir()
+        assert (plugin_dir / "dashboard" / "manifest.json").exists()
+
+        # Legacy install was snapshotted into the NEW backup root.
+        backup_root = hermes_home / "backups" / "summarization-calendar-install"
+        migration_backups = [
+            p for p in backup_root.glob("legacy-migration-*/manifest.json")
+        ]
+        assert len(migration_backups) == 1, "legacy install must be snapshotted exactly once"
+        manifest_data = json.loads(migration_backups[0].read_text())
+        assert manifest_data["previous_type"] == "directory"
+        payload_file = migration_backups[0].parent / "payload" / "old_manifest.json"
+        assert payload_file.exists()
+        assert json.loads(payload_file.read_text()) == {"name": "daily-ledger"}
+
+        # Legacy ledger data is untouched (followed in place by the backend).
+        assert (legacy_ledger / "meta.json").exists()
+        assert json.loads((legacy_ledger / "meta.json").read_text()) == {"date": "2026-03-08"}
+        assert "existing pre-rename data" in result.stdout
+
+    def test_rollback_restores_legacy_root_backup(self, tmp_path):
+        """v1.1.0-era backups under the legacy backup root stay listable and
+        restorable after the rename."""
+        hermes_home = tmp_path / ".hermes"
+        legacy_root = hermes_home / "backups" / "daily-ledger-install"
+        backup_dir = legacy_root / "20260101T000000Z-old"
+        (backup_dir / "payload").mkdir(parents=True)
+        (backup_dir / "payload" / "old_file.txt").write_text("restored content")
+        (backup_dir / "manifest.json").write_text(
+            json.dumps({
+                "backup_id": "20260101T000000Z-old",
+                "created_at": "2026-01-01T00:00:00+0000",
+                "source_path": "/tmp/legacy",
+                "previous_type": "directory",
+                "previous_target": "",
+                "snapshot_reason": "install-snapshot",
+                "ledger_preserved": True,
+                "hermes_home": str(hermes_home),
+                "payload_dir": "payload/",
+            })
+        )
+
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+
+        # Listing (no args) must surface the legacy-root backup.
+        listing = subprocess.run(
+            [str(Path(__file__).parent.parent / "scripts" / "rollback-local.sh")],
+            env={**os.environ, "HERMES_HOME": str(hermes_home)},
+            capture_output=True,
+            text=True,
+            cwd=str(src_dir),
+        )
+        assert "20260101T000000Z-old" in listing.stdout, (
+            f"legacy backup must be listed: {listing.stdout}"
+        )
+        assert "legacy pre-rename backup root" in listing.stdout
+
+        # Restoring it lands the payload at the CURRENT plugin dir.
+        result = subprocess.run(
+            [str(Path(__file__).parent.parent / "scripts" / "rollback-local.sh"), "20260101T000000Z-old"],
+            env={**os.environ, "HERMES_HOME": str(hermes_home)},
+            capture_output=True,
+            text=True,
+            cwd=str(src_dir),
+        )
+        assert result.returncode == 0, f"Rollback failed: {result.stderr}\n{result.stdout}"
+        plugin_dir = hermes_home / "plugins" / "summarization-calendar"
+        assert (plugin_dir / "old_file.txt").exists()
+        assert (plugin_dir / "old_file.txt").read_text() == "restored content"
+
 
 # ====================================================================
 # Source DB Integrity Tests
@@ -1318,7 +1525,7 @@ class TestSourceDbIntegrity:
         original_mtime = db_path.stat().st_mtime
 
         # Run day inventory (read-only)
-        from hermes_daily_ledger.inventory import discover_all, build_day_inventory
+        from hermes_summarization_calendar.inventory import discover_all, build_day_inventory
         profiles, cron_roots = discover_all(home)
         build_day_inventory("2026-03-08", profiles, cron_roots)
 
@@ -1332,7 +1539,7 @@ class TestSourceDbIntegrity:
 
         original_hash = exec_db.read_bytes()
 
-        from hermes_daily_ledger.inventory import discover_all, build_day_inventory
+        from hermes_summarization_calendar.inventory import discover_all, build_day_inventory
         profiles, cron_roots = discover_all(home)
         build_day_inventory("2026-03-08", profiles, cron_roots)
 
@@ -1345,7 +1552,7 @@ class TestSourceDbIntegrity:
 
         original_hash = named_db.read_bytes()
 
-        from hermes_daily_ledger.inventory import discover_all, build_day_inventory
+        from hermes_summarization_calendar.inventory import discover_all, build_day_inventory
         profiles, cron_roots = discover_all(home)
         build_day_inventory("2026-03-08", profiles, cron_roots)
 

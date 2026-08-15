@@ -77,7 +77,7 @@ def _build_chunk_prompt(transcripts: list[dict], date_str: str = "") -> str:
     isolated per-session summarization — use _build_session_chunk_prompt instead.
     """
     header = (
-        "You are Hermes Daily Ledger. Summarize the supplied session inputs.\n\n"
+        "You are Hermes Summarization Calendar. Summarize the supplied session inputs.\n\n"
         "OUTPUT CONTRACT — follow this exactly:\n"
         "1. Return exactly one bare JSON object with no wrapper text, markdown, or "
         "LEDGER_JSON_BEGIN/LEDGER_JSON_END markers.\n"
@@ -139,7 +139,7 @@ def _build_session_chunk_prompt(transcripts: list[dict], date_str: str = "") -> 
         )
 
     header = (
-        "You are Hermes Daily Ledger. Summarize the supplied session input.\n\n"
+        "You are Hermes Summarization Calendar. Summarize the supplied session input.\n\n"
         "OUTPUT CONTRACT — follow this exactly:\n"
         "1. Return exactly one bare JSON object with no wrapper text, markdown, or "
         "LEDGER_JSON_BEGIN/LEDGER_JSON_END markers.\n"

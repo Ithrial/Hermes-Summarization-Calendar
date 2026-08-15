@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build verified source archives from a clean committed Daily Ledger ref.
+# Build verified source archives from a clean committed Summarization Calendar ref.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -52,7 +52,7 @@ fi
 VERSION="$(git show "$REF:dashboard/manifest.json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')"
 python3 scripts/validate-release.py --version "$VERSION"
 
-PREFIX="hermes-daily-ledger-v$VERSION"
+PREFIX="hermes-summarization-calendar-v$VERSION"
 mkdir -p "$OUTPUT"
 TAR_PATH="$OUTPUT/$PREFIX.tar.gz"
 ZIP_PATH="$OUTPUT/$PREFIX.zip"
@@ -79,7 +79,7 @@ import sys
 version, ref, commit, output, target = sys.argv[1:]
 output_path = Path(output)
 files = []
-for archive in sorted(output_path.glob(f"hermes-daily-ledger-v{version}.*")):
+for archive in sorted(output_path.glob(f"hermes-summarization-calendar-v{version}.*")):
     if archive.suffix not in {".gz", ".zip"}:
         continue
     files.append({
@@ -88,7 +88,7 @@ for archive in sorted(output_path.glob(f"hermes-daily-ledger-v{version}.*")):
         "sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
     })
 manifest = {
-    "name": "daily-ledger",
+    "name": "summarization-calendar",
     "version": version,
     "source_ref": ref,
     "commit": commit,
@@ -103,7 +103,7 @@ PY
     sha256sum -c "$(basename "$CHECKSUMS")"
 )
 
-TMP="$(mktemp -d -t daily-ledger-release.XXXXXX)"
+TMP="$(mktemp -d -t summarization-calendar-release.XXXXXX)"
 trap 'rm -rf -- "$TMP"' EXIT
 tar -xzf "$TAR_PATH" -C "$TMP"
 python3 - "$TMP/$PREFIX/dashboard/manifest.json" "$VERSION" <<'PY'
@@ -112,7 +112,7 @@ from pathlib import Path
 import sys
 manifest = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 assert manifest["version"] == sys.argv[2]
-assert manifest["name"] == "daily-ledger"
+assert manifest["name"] == "summarization-calendar"
 PY
 python3 - "$ZIP_PATH" "$PREFIX/dashboard/manifest.json" "$VERSION" <<'PY'
 import json
@@ -121,7 +121,7 @@ import zipfile
 with zipfile.ZipFile(sys.argv[1]) as archive:
     manifest = json.loads(archive.read(sys.argv[2]))
 assert manifest["version"] == sys.argv[3]
-assert manifest["name"] == "daily-ledger"
+assert manifest["name"] == "summarization-calendar"
 PY
 
 echo "Release artifacts built in: $OUTPUT"

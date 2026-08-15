@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the source tree as a shareable Daily Ledger release."""
+"""Validate the source tree as a shareable Summarization Calendar release."""
 from __future__ import annotations
 
 import argparse
@@ -23,7 +23,7 @@ REQUIRED = (
     "dashboard/dist/index.js",
     "dashboard/dist/style.css",
     "dashboard/plugin_api.py",
-    "dashboard/hermes_daily_ledger/__init__.py",
+    "dashboard/hermes_summarization_calendar/__init__.py",
     "scripts/install-local.sh",
     "scripts/status-local.sh",
     "scripts/rollback-local.sh",
@@ -40,7 +40,7 @@ PUBLIC_TEXT = (
     "PROJECT-BRIEF.md",
     "AGENTS.md",
     "docs/RELEASE.md",
-    "docs/plans/2026-07-26-daily-ledger-implementation.md",
+    "docs/plans/2026-07-26-summarization-calendar-implementation.md",
     "docs/plans/2026-07-27-session-summaries.md",
 )
 FORBIDDEN_TERMS = (
@@ -105,8 +105,8 @@ def validate(expected_version: str | None = None) -> list[str]:
         errors.append(
             f"manifest version {version!r} does not match expected {expected_version!r}"
         )
-    if manifest.get("name") != "daily-ledger":
-        errors.append("manifest name must be 'daily-ledger'")
+    if manifest.get("name") != "summarization-calendar":
+        errors.append("manifest name must be 'summarization-calendar'")
 
     for field in ("entry", "css", "api"):
         relative = manifest.get(field)
@@ -118,7 +118,7 @@ def validate(expected_version: str | None = None) -> list[str]:
         bundle = bundle_path.read_text(encoding="utf-8")
         if "window.__HERMES_PLUGIN_SDK__" not in bundle:
             errors.append("frontend bundle does not use the Hermes Plugin SDK")
-        if not re.search(r"register\([\"']daily-ledger[\"']", bundle):
+        if not re.search(r"register\([\"']summarization-calendar[\"']", bundle):
             errors.append("frontend bundle does not register the manifest name")
 
     for relative in PUBLIC_TEXT:
@@ -166,7 +166,7 @@ def main() -> int:
     manifest = json.loads(
         (ROOT / "dashboard" / "manifest.json").read_text(encoding="utf-8")
     )
-    print(f"Release validation passed for daily-ledger v{manifest['version']}")
+    print(f"Release validation passed for summarization-calendar v{manifest['version']}")
     return 0
 
 

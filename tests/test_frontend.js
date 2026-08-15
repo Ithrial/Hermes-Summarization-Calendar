@@ -96,7 +96,7 @@ function loadPlugin(options = {}) {
     },
     __HERMES_PLUGINS__: {
       register(name, component) {
-        assert.equal(name, 'daily-ledger');
+        assert.equal(name, 'summarization-calendar');
         captured.component = component;
       },
     },
@@ -256,7 +256,7 @@ test('auto-titled visibility storage accepts only booleans and fails open', () =
   assert.equal(api.loadShowAutoTitled(storage), false);
   api.saveShowAutoTitled(true, storage);
   assert.equal(api.loadShowAutoTitled(storage), true);
-  values.set('hermes.daily-ledger.showAutoTitled', 'corrupt');
+  values.set('hermes.summarization-calendar.showAutoTitled', 'corrupt');
   assert.equal(api.loadShowAutoTitled(storage), true);
   const throwing = {
     getItem() { throw new Error('unavailable'); },
@@ -1465,8 +1465,38 @@ test('Calendar state initializes exact batch UI fields', () => {
   assert.equal(state.showAutoTitled, true);
 });
 
-test('Calendar restores the local visibility preference and toggling hide prunes only hidden selections', () => {
+test('Calendar reads the legacy pre-rename showAutoTitled preference', () => {
+  // A v1.1.0-and-earlier browser wrote the old key; the renamed plugin must
+  // still honor it (read-only fallback, no migration write).
   const values = new Map([['hermes.daily-ledger.showAutoTitled', 'false']]);
+  const storage = {
+    getItem(key) { return values.has(key) ? values.get(key) : null; },
+    setItem(key, value) { values.set(key, value); },
+  };
+  const { api, captured } = setupStatefulCalendar({ localStorage: storage });
+  // Legacy value honored.
+  assert.equal(captured.getState().showAutoTitled, false);
+  // No migration write on read: new key must not exist yet.
+  assert.equal(values.has('hermes.summarization-calendar.showAutoTitled'), false);
+
+  // Toggling in the UI then writes the NEW key, leaving the legacy one alone.
+  const date = captured.getState().selectedDate;
+  const auto = { profile: 'alpha', session_id: 'auto', title: 'Session 20260802_134519_auto' };
+  setBatchUiState(captured, {
+    dayData: { sessions: [auto], cron_runs: [] },
+    monthData: { days: [{ date, session_count: 1 }] },
+    selectedSessions: {},
+    showAutoTitled: true,
+  });
+  const panel = rawCalendarChild(api, captured, api.DayDetailPanel);
+  panel.props.onToggleShowAutoTitled(false);
+  assert.equal(captured.getState().showAutoTitled, false);
+  assert.equal(values.get('hermes.summarization-calendar.showAutoTitled'), 'false');
+  assert.equal(values.get('hermes.daily-ledger.showAutoTitled'), 'false');
+});
+
+test('Calendar restores the local visibility preference and toggling hide prunes only hidden selections', () => {
+  const values = new Map([['hermes.summarization-calendar.showAutoTitled', 'false']]);
   const storage = {
     getItem(key) { return values.has(key) ? values.get(key) : null; },
     setItem(key, value) { values.set(key, value); },
@@ -1494,7 +1524,7 @@ test('Calendar restores the local visibility preference and toggling hide prunes
   assert.deepEqual(Object.keys(hidden.selectedSessions), [api.batchSelectionKey(date, named)]);
   assert.equal(hidden.dayData.sessions.length, 2);
   assert.equal(hidden.monthData, monthData);
-  assert.equal(values.get('hermes.daily-ledger.showAutoTitled'), 'false');
+  assert.equal(values.get('hermes.summarization-calendar.showAutoTitled'), 'false');
 
   panel = rawCalendarChild(api, captured, api.DayDetailPanel);
   panel.props.onClear();

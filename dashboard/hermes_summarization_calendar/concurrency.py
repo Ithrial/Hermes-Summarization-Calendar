@@ -44,7 +44,7 @@ def get_date_lock(date: str) -> threading.Lock:
 
 def get_ledger_running_dir(ledger_root: Path | None = None) -> Path:
     """Return the directory where durable status JSONs are stored."""
-    from hermes_daily_ledger.recap_storage import get_ledger_root
+    from hermes_summarization_calendar.recap_storage import get_ledger_root
 
     root = ledger_root or get_ledger_root()
     running_dir = root / "running"

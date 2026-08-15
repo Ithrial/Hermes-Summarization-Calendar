@@ -36,8 +36,8 @@ import pytest
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent / "dashboard"))
 
-import hermes_daily_ledger.batch_jobs as batch_jobs
-from hermes_daily_ledger.summary_jobs import _reset_for_tests
+import hermes_summarization_calendar.batch_jobs as batch_jobs
+from hermes_summarization_calendar.summary_jobs import _reset_for_tests
 
 
 # ---------------------------------------------------------------------------
@@ -110,7 +110,7 @@ class TestBatchOrchestrator:
     # -- strict order & single-generation-at-a-time -------------------------
 
     def test_strict_stored_order_and_one_at_a_time(self, tmp_path: Path) -> None:
-        from hermes_daily_ledger.batch_orchestrator import run_batch_summary
+        from hermes_summarization_calendar.batch_orchestrator import run_batch_summary
 
         root = tmp_path / "ledger"
         date, bid = "2026-03-10", "order-test"
@@ -159,7 +159,7 @@ class TestBatchOrchestrator:
     # -- missing -> generate ------------------------------------------------
 
     def test_missing_artifact_generates(self, tmp_path: Path) -> None:
-        from hermes_daily_ledger.batch_orchestrator import run_batch_summary
+        from hermes_summarization_calendar.batch_orchestrator import run_batch_summary
 
         root = tmp_path / "ledger"
         date, bid = "2026-03-10", "missing-test"
@@ -192,7 +192,7 @@ class TestBatchOrchestrator:
     # -- stale -> regenerate ------------------------------------------------
 
     def test_stale_artifact_regenerates(self, tmp_path: Path) -> None:
-        from hermes_daily_ledger.batch_orchestrator import run_batch_summary
+        from hermes_summarization_calendar.batch_orchestrator import run_batch_summary
 
         root = tmp_path / "ledger"
         date, bid = "2026-03-10", "stale-test"
@@ -224,7 +224,7 @@ class TestBatchOrchestrator:
     # -- current -> skip ----------------------------------------------------
 
     def test_current_artifact_skipped(self, tmp_path: Path) -> None:
-        from hermes_daily_ledger.batch_orchestrator import run_batch_summary
+        from hermes_summarization_calendar.batch_orchestrator import run_batch_summary
 
         root = tmp_path / "ledger"
         date, bid = "2026-03-10", "current-skip"
@@ -255,7 +255,7 @@ class TestBatchOrchestrator:
     # -- explicit current regenerate ----------------------------------------
 
     def test_regenerate_current_overrides_skip(self, tmp_path: Path) -> None:
-        from hermes_daily_ledger.batch_orchestrator import run_batch_summary
+        from hermes_summarization_calendar.batch_orchestrator import run_batch_summary
 
         root = tmp_path / "ledger"
         date, bid = "2026-03-10", "regen-current"
@@ -287,7 +287,7 @@ class TestBatchOrchestrator:
     # -- pre-existing running -> skipped_running ----------------------------
 
     def test_pre_existing_running_skipped(self, tmp_path: Path) -> None:
-        from hermes_daily_ledger.batch_orchestrator import run_batch_summary
+        from hermes_summarization_calendar.batch_orchestrator import run_batch_summary
 
         root = tmp_path / "ledger"
         date, bid = "2026-03-10", "pre-running"
@@ -314,7 +314,7 @@ class TestBatchOrchestrator:
     # -- acquire race -> skipped_running ------------------------------------
 
     def test_acquire_race_becomes_skipped_running(self, tmp_path: Path) -> None:
-        from hermes_daily_ledger.batch_orchestrator import run_batch_summary
+        from hermes_summarization_calendar.batch_orchestrator import run_batch_summary
 
         root = tmp_path / "ledger"
         date, bid = "2026-03-10", "acquire-race"
@@ -341,7 +341,7 @@ class TestBatchOrchestrator:
     # -- capacity failure -> failed but continues ---------------------------
 
     def test_capacity_failure_failed_continues(self, tmp_path: Path) -> None:
-        from hermes_daily_ledger.batch_orchestrator import run_batch_summary
+        from hermes_summarization_calendar.batch_orchestrator import run_batch_summary
 
         root = tmp_path / "ledger"
         date, bid = "2026-03-10", "capacity-fail"
@@ -388,7 +388,7 @@ class TestBatchOrchestrator:
     # -- vanished session -> failed but continues ---------------------------
 
     def test_vanished_session_failed_continues(self, tmp_path: Path) -> None:
-        from hermes_daily_ledger.batch_orchestrator import run_batch_summary
+        from hermes_summarization_calendar.batch_orchestrator import run_batch_summary
 
         root = tmp_path / "ledger"
         date, bid = "2026-03-10", "vanished"
@@ -433,7 +433,7 @@ class TestBatchOrchestrator:
     # -- successful immutable version_id capture ----------------------------
 
     def test_version_id_captured_on_success(self, tmp_path: Path) -> None:
-        from hermes_daily_ledger.batch_orchestrator import run_batch_summary
+        from hermes_summarization_calendar.batch_orchestrator import run_batch_summary
 
         root = tmp_path / "ledger"
         date, bid = "2026-03-10", "version-capture"
@@ -463,7 +463,7 @@ class TestBatchOrchestrator:
     # -- returned failed job -> sanitized/generic error ---------------------
 
     def test_failed_job_sanitized_error(self, tmp_path: Path) -> None:
-        from hermes_daily_ledger.batch_orchestrator import run_batch_summary
+        from hermes_summarization_calendar.batch_orchestrator import run_batch_summary
 
         root = tmp_path / "ledger"
         date, bid = "2026-03-10", "failed-sanitize"
@@ -493,7 +493,7 @@ class TestBatchOrchestrator:
         assert len(error_text) <= 500
 
     def test_failed_job_no_error_uses_generic(self, tmp_path: Path) -> None:
-        from hermes_daily_ledger.batch_orchestrator import run_batch_summary
+        from hermes_summarization_calendar.batch_orchestrator import run_batch_summary
 
         root = tmp_path / "ledger"
         date, bid = "2026-03-10", "failed-generic"
@@ -524,7 +524,7 @@ class TestBatchOrchestrator:
     # -- raised exception -> generic durable error + continuation ----------
 
     def test_raised_exception_generic_error_continues(self, tmp_path: Path) -> None:
-        from hermes_daily_ledger.batch_orchestrator import run_batch_summary
+        from hermes_summarization_calendar.batch_orchestrator import run_batch_summary
 
         root = tmp_path / "ledger"
         date, bid = "2026-03-10", "exception-cont"
@@ -560,7 +560,7 @@ class TestBatchOrchestrator:
     # -- derivation: completed / all-skip / partial / all-failed -----------
 
     def test_all_completed_derivation(self, tmp_path: Path) -> None:
-        from hermes_daily_ledger.batch_orchestrator import run_batch_summary
+        from hermes_summarization_calendar.batch_orchestrator import run_batch_summary
 
         root = tmp_path / "ledger"
         date, bid = "2026-03-10", "all-completed"
@@ -585,7 +585,7 @@ class TestBatchOrchestrator:
         assert result["status"] == "completed"
 
     def test_all_skip_derivation(self, tmp_path: Path) -> None:
-        from hermes_daily_ledger.batch_orchestrator import run_batch_summary
+        from hermes_summarization_calendar.batch_orchestrator import run_batch_summary
 
         root = tmp_path / "ledger"
         date, bid = "2026-03-10", "all-skip"
@@ -604,7 +604,7 @@ class TestBatchOrchestrator:
         assert result["status"] == "completed"
 
     def test_partial_derivation(self, tmp_path: Path) -> None:
-        from hermes_daily_ledger.batch_orchestrator import run_batch_summary
+        from hermes_summarization_calendar.batch_orchestrator import run_batch_summary
 
         root = tmp_path / "ledger"
         date, bid = "2026-03-10", "partial-deriv"
@@ -634,7 +634,7 @@ class TestBatchOrchestrator:
         assert result["status"] == "partial"
 
     def test_all_failed_derivation(self, tmp_path: Path) -> None:
-        from hermes_daily_ledger.batch_orchestrator import run_batch_summary
+        from hermes_summarization_calendar.batch_orchestrator import run_batch_summary
 
         root = tmp_path / "ledger"
         date, bid = "2026-03-10", "all-failed"
@@ -661,7 +661,7 @@ class TestBatchOrchestrator:
     # -- outer failure cleanup ---------------------------------------------
 
     def test_outer_failure_cleanup_no_queued_running(self, tmp_path: Path) -> None:
-        from hermes_daily_ledger.batch_orchestrator import run_batch_summary
+        from hermes_summarization_calendar.batch_orchestrator import run_batch_summary
 
         root = tmp_path / "ledger"
         date, bid = "2026-03-10", "outer-fail"
@@ -699,7 +699,7 @@ class TestBatchOrchestrator:
     # -- exact slot_reserved=True call & no thread creation ----------------
 
     def test_slot_reserved_true_and_no_threads(self, tmp_path: Path) -> None:
-        from hermes_daily_ledger.batch_orchestrator import run_batch_summary
+        from hermes_summarization_calendar.batch_orchestrator import run_batch_summary
 
         root = tmp_path / "ledger"
         date, bid = "2026-03-10", "slot-reserved"
@@ -734,7 +734,7 @@ class TestBatchOrchestrator:
     # -- per-member inventory refresh --------------------------------------
 
     def test_inventory_refreshed_per_member(self, tmp_path: Path) -> None:
-        from hermes_daily_ledger.batch_orchestrator import run_batch_summary
+        from hermes_summarization_calendar.batch_orchestrator import run_batch_summary
 
         root = tmp_path / "ledger"
         date, bid = "2026-03-10", "refresh-inv"
@@ -773,7 +773,7 @@ class TestBatchOrchestrator:
     # -- no raw content/error leakage --------------------------------------
 
     def test_no_raw_content_leakage(self, tmp_path: Path) -> None:
-        from hermes_daily_ledger.batch_orchestrator import run_batch_summary
+        from hermes_summarization_calendar.batch_orchestrator import run_batch_summary
 
         root = tmp_path / "ledger"
         date, bid = "2026-03-10", "no-leak"
@@ -809,7 +809,7 @@ class TestBatchOrchestrator:
     def test_production_signature_discover_build_per_member(self, tmp_path: Path) -> None:
         """Prove that discover_all_deps and build_inventory are called per-member
         with REAL list arguments (not None), preserving per-member re-evaluation."""
-        from hermes_daily_ledger.batch_orchestrator import run_batch_summary
+        from hermes_summarization_calendar.batch_orchestrator import run_batch_summary
 
         root = tmp_path / "ledger"
         date, bid = "2026-03-10", "prod-sig"
@@ -860,7 +860,7 @@ class TestBatchOrchestrator:
         is called exactly once with correct identity + generic error.
         On a normal returned failed status, it is NOT called.
         Subsequent member still runs."""
-        from hermes_daily_ledger.batch_orchestrator import run_batch_summary
+        from hermes_summarization_calendar.batch_orchestrator import run_batch_summary
 
         root = tmp_path / "ledger"
         date, bid = "2026-03-10", "fail-callback"
@@ -919,7 +919,7 @@ class TestBatchOrchestrator:
         """First member completes; second build raises; outer cleanup leaves
         second and third failed with no queued/running members. Terminal aggregate.
         Durable errors are generic and do not contain exception text."""
-        from hermes_daily_ledger.batch_orchestrator import run_batch_summary
+        from hermes_summarization_calendar.batch_orchestrator import run_batch_summary
 
         root = tmp_path / "ledger"
         date, bid = "2026-03-10", "inv-build-fail"
@@ -978,7 +978,7 @@ class TestBatchOrchestrator:
     def test_sanitize_error_strips_leak_patterns(self, tmp_path: Path) -> None:
         """Positive tests: paths, traceback, api_key, token:, system message, user message
         still trigger generic fallback."""
-        from hermes_daily_ledger.batch_orchestrator import _sanitize_error
+        from hermes_summarization_calendar.batch_orchestrator import _sanitize_error
 
         # Path leak
         assert _sanitize_error("error at /home/alice/data") == "Session summary generation failed"
@@ -1006,7 +1006,7 @@ class TestBatchOrchestrator:
     def test_sanitize_error_allows_prompt_and_secret(self, tmp_path: Path) -> None:
         """Negative tests: standalone 'prompt' and 'secret' are NOT stripped.
         Legitimate diagnostic text containing these words passes through."""
-        from hermes_daily_ledger.batch_orchestrator import _sanitize_error
+        from hermes_summarization_calendar.batch_orchestrator import _sanitize_error
 
         # "prompt" alone should NOT trigger generic fallback
         result = _sanitize_error("model prompt exceeded context window")
@@ -1019,7 +1019,7 @@ class TestBatchOrchestrator:
         assert result2 != "Session summary generation failed"
 
     def test_sanitize_error_empty_and_none(self, tmp_path: Path) -> None:
-        from hermes_daily_ledger.batch_orchestrator import _sanitize_error
+        from hermes_summarization_calendar.batch_orchestrator import _sanitize_error
 
         assert _sanitize_error(None) == "Session summary generation failed"
         assert _sanitize_error("") == "Session summary generation failed"

@@ -1,6 +1,6 @@
 # Release procedure
 
-This procedure freezes a tested Daily Ledger commit into source archives that can be installed without the development machine or its Hermes data.
+This procedure freezes a tested Summarization Calendar commit into source archives that can be installed without the development machine or its Hermes data.
 
 ## Required artifacts
 
@@ -10,7 +10,7 @@ A release consists of:
 - `dashboard/manifest.json` with the same version;
 - source repository with MIT `LICENSE`;
 - prebuilt `dashboard/dist/index.js` and `style.css`;
-- `dashboard/plugin_api.py` and `dashboard/hermes_daily_ledger/` backend package;
+- `dashboard/plugin_api.py` and `dashboard/hermes_summarization_calendar/` backend package;
 - install, status, rollback, and uninstall scripts;
 - README, changelog, security policy, contribution guide, and this release procedure;
 - backend/frontend/loader/install/release tests;
@@ -41,7 +41,7 @@ Screenshots are publication assets rather than runtime dependencies. Use only sy
 Create the annotated tag only after the gate is green:
 
 ```bash
-git tag -a v1.0.0 -m "Hermes Daily Ledger v1.0.0"
+git tag -a v1.0.0 -m "Hermes Summarization Calendar v1.0.0"
 ./scripts/build-release.sh --ref v1.0.0
 ```
 
@@ -53,11 +53,11 @@ Use a temporary Hermes home and the extracted archive:
 
 ```bash
 workdir="$(mktemp -d)"
-tar -xzf artifacts/hermes-daily-ledger-v1.0.0.tar.gz -C "$workdir"
+tar -xzf artifacts/hermes-summarization-calendar-v1.0.0.tar.gz -C "$workdir"
 HERMES_HOME="$workdir/hermes-home" \
-  "$workdir/hermes-daily-ledger-v1.0.0/scripts/install-local.sh" --copy
+  "$workdir/hermes-summarization-calendar-v1.0.0/scripts/install-local.sh" --copy
 HERMES_HOME="$workdir/hermes-home" \
-  "$workdir/hermes-daily-ledger-v1.0.0/scripts/status-local.sh"
+  "$workdir/hermes-summarization-calendar-v1.0.0/scripts/status-local.sh"
 ```
 
 Then import `dashboard/plugin_api.py` by file path with the actual Dashboard interpreter and verify its route set. Do not use a test-only `PYTHONPATH` for that loader check.
@@ -67,11 +67,11 @@ Then import `dashboard/plugin_api.py` by file path with the actual Dashboard int
 A release archive contains only the selected source snapshot; it does not contain Git history. Before publishing an existing development repository, audit every commit reachable from the public branch. If that history contains operator paths, private backend names, captures, or other local details, create the public repository from the verified extracted archive instead:
 
 ```bash
-cd /path/to/extracted/hermes-daily-ledger-v1.0.0
+cd /path/to/extracted/hermes-summarization-calendar-v1.0.0
 git init -b main
 git add .
-git commit -m "release: Hermes Daily Ledger v1.0.0"
-git tag -a v1.0.0 -m "Hermes Daily Ledger v1.0.0"
+git commit -m "release: Hermes Summarization Calendar v1.0.0"
+git tag -a v1.0.0 -m "Hermes Summarization Calendar v1.0.0"
 ```
 
 Before publishing:

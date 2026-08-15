@@ -1,6 +1,21 @@
 # Changelog
 
-All notable changes to Hermes Daily Ledger are documented here.
+All notable changes to Hermes Summarization Calendar are documented here.
+
+## 1.2.0 — 2026-08-15
+
+### Changed
+- Renamed the plugin identity from "Daily Ledger" to "Hermes Summarization Calendar". The plugin id, API route, Python package, install directory, data root, archive prefix, and CI artifact are now all `summarization-calendar` (package `hermes_summarization_calendar`). This is a cosmetic-plus-path rename: the feature set is unchanged from 1.1.0.
+
+### Compatibility
+- Backward compatible with v1.1.0-and-earlier data. Existing installs keep their recaps:
+  - **Data root fallback** — if `$HERMES_HOME/summarization-calendar` has no stored data but the legacy `$HERMES_HOME/daily-ledger` does, the backend follows the legacy store in place (no split-brain, no copy). Fresh installs land on the new root.
+  - **Legacy source exclusion** — plugin-internal sessions tagged `source='daily-ledger'` (written by pre-rename Hermes core) are still excluded from inventory and recap input, alongside the current `source='summarization-calendar'` tag.
+  - **Legacy install migration** — `install-local.sh` snapshots and removes any pre-rename `plugins/daily-ledger` install (into the new backup root) so it cannot coexist or double-load; it is fully restorable via `rollback-local.sh`.
+  - **Legacy backup discovery** — `rollback-local.sh` lists and restores v1.1.0-era backups found under the legacy `backups/daily-ledger-install` root.
+  - **Legacy UI preference** — the browser `showAutoTitled` preference written under the old `hermes.daily-ledger.showAutoTitled` localStorage key is still honored (read-only fallback; toggling writes the new key).
+- `status-local.sh` reports the *effective* data store (new root, or the legacy root if that is what holds data).
+- Day boundaries remain `America/Chicago`.
 
 ## 1.1.0 — 2026-08-02
 

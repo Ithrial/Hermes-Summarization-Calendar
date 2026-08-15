@@ -17,8 +17,8 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, str(Path(__file__).parent.parent / "dashboard"))
 
 import plugin_api as api
-from hermes_daily_ledger.inventory import build_day_inventory, discover_all
-from hermes_daily_ledger.session_storage import save_session_summary
+from hermes_summarization_calendar.inventory import build_day_inventory, discover_all
+from hermes_summarization_calendar.session_storage import save_session_summary
 
 
 DATE = "2026-03-08"
@@ -50,7 +50,7 @@ def client(test_hermes_home, tmp_path: Path, monkeypatch):
         api._worker_pool.clear()
     api._startup_done = False
     app = FastAPI()
-    app.include_router(api.router, prefix="/api/plugins/daily-ledger")
+    app.include_router(api.router, prefix="/api/plugins/summarization-calendar")
     yield TestClient(app), home, ledger_root, monkeypatch
     with api._worker_lock:
         api._worker_pool.clear()
@@ -90,7 +90,7 @@ def test_post_batch_summary_valid_202_returns_batch_object(client) -> None:
     ]
 
     response = http.post(
-        "/api/plugins/daily-ledger/session-summary/batch",
+        "/api/plugins/summarization-calendar/session-summary/batch",
         params={"date": DATE},
         json={"sessions": members, "regenerate_current": False},
     )
@@ -116,7 +116,7 @@ def test_post_batch_summary_empty_sessions_rejected(client) -> None:
     http, home, root, monkeypatch = client
     monkeypatch.setattr(api.threading, "Thread", FakeThread)
     response = http.post(
-        "/api/plugins/daily-ledger/session-summary/batch",
+        "/api/plugins/summarization-calendar/session-summary/batch",
         params={"date": DATE},
         json={"sessions": [], "regenerate_current": False},
     )
@@ -129,7 +129,7 @@ def test_post_batch_summary_missing_body_rejected(client) -> None:
     http, home, root, monkeypatch = client
     monkeypatch.setattr(api.threading, "Thread", FakeThread)
     response = http.post(
-        "/api/plugins/daily-ledger/session-summary/batch",
+        "/api/plugins/summarization-calendar/session-summary/batch",
         params={"date": DATE},
         json={},  # missing sessions
     )
@@ -144,7 +144,7 @@ def test_post_batch_summary_over_100_members_rejected(client) -> None:
         for i in range(101)
     ]
     response = http.post(
-        "/api/plugins/daily-ledger/session-summary/batch",
+        "/api/plugins/summarization-calendar/session-summary/batch",
         params={"date": DATE},
         json={"sessions": members},
     )
@@ -159,7 +159,7 @@ def test_post_batch_summary_duplicate_identity_rejected(client) -> None:
         {"profile": PROFILE, "session_id": SESSION_ID},  # duplicate
     ]
     response = http.post(
-        "/api/plugins/daily-ledger/session-summary/batch",
+        "/api/plugins/summarization-calendar/session-summary/batch",
         params={"date": DATE},
         json={"sessions": members},
     )
@@ -173,7 +173,7 @@ def test_post_batch_summary_blank_profile_rejected(client) -> None:
         {"profile": "", "session_id": SESSION_ID},
     ]
     response = http.post(
-        "/api/plugins/daily-ledger/session-summary/batch",
+        "/api/plugins/summarization-calendar/session-summary/batch",
         params={"date": DATE},
         json={"sessions": members},
     )
@@ -187,7 +187,7 @@ def test_post_batch_summary_blank_session_id_rejected(client) -> None:
         {"profile": PROFILE, "session_id": ""},
     ]
     response = http.post(
-        "/api/plugins/daily-ledger/session-summary/batch",
+        "/api/plugins/summarization-calendar/session-summary/batch",
         params={"date": DATE},
         json={"sessions": members},
     )
@@ -212,7 +212,7 @@ def test_post_batch_summary_identity_absent_for_date_rejected(client) -> None:
     ]
 
     response = http.post(
-        "/api/plugins/daily-ledger/session-summary/batch",
+        "/api/plugins/summarization-calendar/session-summary/batch",
         params={"date": DATE},
         json={"sessions": members},
     )
@@ -238,7 +238,7 @@ def test_post_batch_summary_worker_capacity_503(client) -> None:
     ]
 
     response = http.post(
-        "/api/plugins/daily-ledger/session-summary/batch",
+        "/api/plugins/summarization-calendar/session-summary/batch",
         params={"date": DATE},
         json={"sessions": members},
     )
@@ -249,7 +249,7 @@ def test_post_batch_summary_worker_capacity_503(client) -> None:
 def test_post_batch_summary_invalid_date_format_rejected(client) -> None:
     http, _home, _root, _ = client
     response = http.post(
-        "/api/plugins/daily-ledger/session-summary/batch",
+        "/api/plugins/summarization-calendar/session-summary/batch",
         params={"date": "2026-3-8"},  # wrong format
         json={"sessions": [{"profile": PROFILE, "session_id": SESSION_ID}]},
     )
@@ -269,7 +269,7 @@ def test_post_batch_summary_no_raw_content_in_response(client) -> None:
     ]
 
     response = http.post(
-        "/api/plugins/daily-ledger/session-summary/batch",
+        "/api/plugins/summarization-calendar/session-summary/batch",
         params={"date": DATE},
         json={"sessions": members},
     )
@@ -301,14 +301,14 @@ def test_get_batch_summary_returns_status(client) -> None:
     ]
 
     post_resp = http.post(
-        "/api/plugins/daily-ledger/session-summary/batch",
+        "/api/plugins/summarization-calendar/session-summary/batch",
         params={"date": DATE},
         json={"sessions": members},
     )
     batch_id = post_resp.json()["batch_id"]
 
     get_resp = http.get(
-        "/api/plugins/daily-ledger/session-summary/batch",
+        "/api/plugins/summarization-calendar/session-summary/batch",
         params={"date": DATE, "batch_id": batch_id},
     )
 
@@ -325,7 +325,7 @@ def test_get_batch_summary_returns_status(client) -> None:
 def test_get_batch_summary_not_found_404(client) -> None:
     http, _home, _root, _ = client
     response = http.get(
-        "/api/plugins/daily-ledger/session-summary/batch",
+        "/api/plugins/summarization-calendar/session-summary/batch",
         params={"date": DATE, "batch_id": "nonexistent"},
     )
     assert response.status_code == 404
@@ -334,7 +334,7 @@ def test_get_batch_summary_not_found_404(client) -> None:
 def test_get_batch_summary_invalid_batch_id_format_400(client) -> None:
     http, _home, _root, _ = client
     response = http.get(
-        "/api/plugins/daily-ledger/session-summary/batch",
+        "/api/plugins/summarization-calendar/session-summary/batch",
         params={"date": DATE, "batch_id": "batch/with/slash"},
     )
     assert response.status_code == 400
@@ -343,7 +343,7 @@ def test_get_batch_summary_invalid_batch_id_format_400(client) -> None:
 def test_get_batch_summary_path_traversal_rejected(client) -> None:
     http, _home, _root, _ = client
     response = http.get(
-        "/api/plugins/daily-ledger/session-summary/batch",
+        "/api/plugins/summarization-calendar/session-summary/batch",
         params={"date": DATE, "batch_id": "../../etc/passwd"},
     )
     assert response.status_code == 400
@@ -362,14 +362,14 @@ def test_get_batch_summary_no_raw_content_in_response(client) -> None:
     ]
 
     post_resp = http.post(
-        "/api/plugins/daily-ledger/session-summary/batch",
+        "/api/plugins/summarization-calendar/session-summary/batch",
         params={"date": DATE},
         json={"sessions": members},
     )
     batch_id = post_resp.json()["batch_id"]
 
     get_resp = http.get(
-        "/api/plugins/daily-ledger/session-summary/batch",
+        "/api/plugins/summarization-calendar/session-summary/batch",
         params={"date": DATE, "batch_id": batch_id},
     )
 
@@ -398,13 +398,13 @@ def test_list_batches_returns_date_and_list(client) -> None:
     ]
 
     http.post(
-        "/api/plugins/daily-ledger/session-summary/batch",
+        "/api/plugins/summarization-calendar/session-summary/batch",
         params={"date": DATE},
         json={"sessions": members},
     )
 
     list_resp = http.get(
-        "/api/plugins/daily-ledger/session-summary/batches",
+        "/api/plugins/summarization-calendar/session-summary/batches",
         params={"date": DATE},
     )
 
@@ -428,13 +428,13 @@ def test_list_batches_default_limit_20(client) -> None:
             {"profile": inventory.sessions[0].profile, "session_id": inventory.sessions[0].session_id}
         ]
         http.post(
-            "/api/plugins/daily-ledger/session-summary/batch",
+            "/api/plugins/summarization-calendar/session-summary/batch",
             params={"date": DATE},
             json={"sessions": members},
         )
 
     list_resp = http.get(
-        "/api/plugins/daily-ledger/session-summary/batches",
+        "/api/plugins/summarization-calendar/session-summary/batches",
         params={"date": DATE},
     )
 
@@ -449,7 +449,7 @@ def test_list_batches_strict_limit_validation(client) -> None:
 
     # limit=true (bool) should be rejected
     response = http.get(
-        "/api/plugins/daily-ledger/session-summary/batches",
+        "/api/plugins/summarization-calendar/session-summary/batches",
         params={"date": DATE, "limit": "true"},
     )
     # FastAPI will parse "true" as string, but the query validation should reject non-int
@@ -460,7 +460,7 @@ def test_list_batches_over_max_limit_rejected(client) -> None:
     http, _home, _root, _ = client
 
     response = http.get(
-        "/api/plugins/daily-ledger/session-summary/batches",
+        "/api/plugins/summarization-calendar/session-summary/batches",
         params={"date": DATE, "limit": 100},
     )
     assert response.status_code == 422  # FastAPI returns 422 for query param validation
@@ -470,7 +470,7 @@ def test_list_batches_under_min_limit_rejected(client) -> None:
     http, _home, _root, _ = client
 
     response = http.get(
-        "/api/plugins/daily-ledger/session-summary/batches",
+        "/api/plugins/summarization-calendar/session-summary/batches",
         params={"date": DATE, "limit": 0},
     )
     assert response.status_code == 422  # FastAPI returns 422 for query param validation
@@ -489,13 +489,13 @@ def test_list_batches_no_raw_content_in_response(client) -> None:
     ]
 
     http.post(
-        "/api/plugins/daily-ledger/session-summary/batch",
+        "/api/plugins/summarization-calendar/session-summary/batch",
         params={"date": DATE},
         json={"sessions": members},
     )
 
     list_resp = http.get(
-        "/api/plugins/daily-ledger/session-summary/batches",
+        "/api/plugins/summarization-calendar/session-summary/batches",
         params={"date": DATE},
     )
 

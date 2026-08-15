@@ -15,10 +15,10 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import plugin_api as api
-from hermes_daily_ledger.inventory import build_day_inventory, discover_all
-from hermes_daily_ledger.rollup_orchestrator import build_rollup_inputs
-from hermes_daily_ledger.session_storage import save_rollup, save_session_summary
-from hermes_daily_ledger.summary_jobs import (
+from hermes_summarization_calendar.inventory import build_day_inventory, discover_all
+from hermes_summarization_calendar.rollup_orchestrator import build_rollup_inputs
+from hermes_summarization_calendar.session_storage import save_rollup, save_session_summary
+from hermes_summarization_calendar.summary_jobs import (
     _reset_for_tests,
     acquire_rollup_job,
     acquire_session_job,
@@ -51,7 +51,7 @@ def client(test_hermes_home, tmp_path: Path, monkeypatch):
         api._worker_pool.clear()
     api._startup_done = False
     app = FastAPI()
-    app.include_router(api.router, prefix="/api/plugins/daily-ledger")
+    app.include_router(api.router, prefix="/api/plugins/summarization-calendar")
     yield TestClient(app), home, ledger_root, monkeypatch
     _reset_for_tests()
     with api._worker_lock:
@@ -60,7 +60,7 @@ def client(test_hermes_home, tmp_path: Path, monkeypatch):
 
 def test_day_enriches_each_session_with_summary_status_without_content(client) -> None:
     http, _home, _root, _ = client
-    response = http.get(f"/api/plugins/daily-ledger/day?date={DATE}")
+    response = http.get(f"/api/plugins/summarization-calendar/day?date={DATE}")
     assert response.status_code == 200
     sessions = response.json()["sessions"]
     assert sessions
@@ -90,7 +90,7 @@ def test_get_session_summary_returns_safe_data_and_versions(client) -> None:
     )
 
     response = http.get(
-        "/api/plugins/daily-ledger/session-summary",
+        "/api/plugins/summarization-calendar/session-summary",
         params={"date": DATE, "profile": PROFILE, "session_id": SESSION_ID},
     )
     assert response.status_code == 200
@@ -108,14 +108,14 @@ def test_get_session_summary_returns_safe_data_and_versions(client) -> None:
 def test_unknown_and_invalid_composite_identities_are_rejected(client) -> None:
     http, _home, _root, _ = client
     unknown = http.get(
-        "/api/plugins/daily-ledger/session-summary",
+        "/api/plugins/summarization-calendar/session-summary",
         params={"date": DATE, "profile": PROFILE, "session_id": "unknown"},
     )
     assert unknown.status_code == 404
 
     for profile, session_id in (("../default", SESSION_ID), (PROFILE, "../../etc")):
         response = http.get(
-            "/api/plugins/daily-ledger/session-summary",
+            "/api/plugins/summarization-calendar/session-summary",
             params={"date": DATE, "profile": profile, "session_id": session_id},
         )
         assert response.status_code == 400
@@ -125,14 +125,14 @@ def test_post_session_summary_queues_and_same_identity_conflicts(client) -> None
     http, _home, _root, monkeypatch = client
     monkeypatch.setattr(api.threading, "Thread", FakeThread)
     first = http.post(
-        "/api/plugins/daily-ledger/session-summary",
+        "/api/plugins/summarization-calendar/session-summary",
         params={"date": DATE, "profile": PROFILE, "session_id": SESSION_ID},
         json={"force_regenerate": False},
     )
     assert first.status_code == 202
     assert first.json()["status"] == "queued"
     second = http.post(
-        "/api/plugins/daily-ledger/session-summary",
+        "/api/plugins/summarization-calendar/session-summary",
         params={"date": DATE, "profile": PROFILE, "session_id": SESSION_ID},
         json={"force_regenerate": False},
     )
@@ -152,7 +152,7 @@ def test_existing_summary_requires_explicit_force(client) -> None:
         session.source_fingerprint, ledger_root=root,
     )
     response = http.post(
-        "/api/plugins/daily-ledger/session-summary",
+        "/api/plugins/summarization-calendar/session-summary",
         params={"date": DATE, "profile": PROFILE, "session_id": SESSION_ID},
         json={"force_regenerate": False},
     )
@@ -178,7 +178,7 @@ def test_session_rollback_route_restores_selected_version(client) -> None:
         session.source_fingerprint, ledger_root=root,
     )
     response = http.post(
-        "/api/plugins/daily-ledger/session-summary/rollback",
+        "/api/plugins/summarization-calendar/session-summary/rollback",
         params={
             "date": DATE,
             "profile": PROFILE,
@@ -200,14 +200,14 @@ def test_rollup_get_and_post_contract(client) -> None:
         session.source_fingerprint, ledger_root=root,
     )
     empty = http.get(
-        "/api/plugins/daily-ledger/rollup", params={"date": DATE}
+        "/api/plugins/summarization-calendar/rollup", params={"date": DATE}
     )
     assert empty.status_code == 200
     assert empty.json()["exists"] is False
 
     monkeypatch.setattr(api.threading, "Thread", FakeThread)
     queued = http.post(
-        "/api/plugins/daily-ledger/rollup",
+        "/api/plugins/summarization-calendar/rollup",
         params={"date": DATE},
         json={"force_regenerate": False},
     )
@@ -232,7 +232,7 @@ def test_month_badge_prefers_new_rollup_and_detects_staleness(client) -> None:
         ledger_root=root,
     )
 
-    fresh = http.get("/api/plugins/daily-ledger/month?year=2026&month=3")
+    fresh = http.get("/api/plugins/summarization-calendar/month?year=2026&month=3")
     march_8 = next(day for day in fresh.json()["days"] if day["date"] == DATE)
     assert march_8["has_recap"] is True
     assert march_8["recap_stale"] is False
@@ -243,7 +243,7 @@ def test_month_badge_prefers_new_rollup_and_detects_staleness(client) -> None:
             (session.session_id,),
         )
         conn.commit()
-    stale = http.get("/api/plugins/daily-ledger/month?year=2026&month=3")
+    stale = http.get("/api/plugins/summarization-calendar/month?year=2026&month=3")
     march_8 = next(day for day in stale.json()["days"] if day["date"] == DATE)
     assert march_8["has_recap"] is True
     assert march_8["recap_stale"] is True
@@ -265,7 +265,7 @@ def test_session_rollback_recovers_stale_prior_process_job(client) -> None:
     assert acquire_session_job(DATE, PROFILE, SESSION_ID, root) is not None
 
     response = http.post(
-        "/api/plugins/daily-ledger/session-summary/rollback",
+        "/api/plugins/summarization-calendar/session-summary/rollback",
         params={
             "date": DATE,
             "profile": PROFILE,
@@ -294,7 +294,7 @@ def test_session_rollback_rejects_running_generation(client) -> None:
     assert acquire_session_job(DATE, PROFILE, SESSION_ID, root) is not None
 
     response = http.post(
-        "/api/plugins/daily-ledger/session-summary/rollback",
+        "/api/plugins/summarization-calendar/session-summary/rollback",
         params={
             "date": DATE,
             "profile": PROFILE,
@@ -318,7 +318,7 @@ def test_rollup_rollback_rejects_running_generation(client) -> None:
     assert acquire_rollup_job(DATE, root) is not None
 
     response = http.post(
-        "/api/plugins/daily-ledger/rollup/rollback",
+        "/api/plugins/summarization-calendar/rollup/rollback",
         params={"date": DATE, "version": version.version_id},
         json={},
     )

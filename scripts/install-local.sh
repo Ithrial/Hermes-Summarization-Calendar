@@ -1,27 +1,31 @@
 #!/usr/bin/env bash
-# install-local.sh — Install daily-ledger plugin with pre-install snapshot.
+# install-local.sh — Install summarization-calendar plugin with pre-install snapshot.
 #
 # Layout: <backup>/manifest.json + <backup>/payload/ (never writes through symlinks)
 #   - manifest.json: machine-readable backup metadata
 #   - payload/: exact copy of files/dirs; symlinks recorded but NOT followed
 #
 # Usage: ./install-local.sh [--symlink|--copy]
-#   --symlink  (default) creates a symlink from ~/.hermes/plugins/daily-ledger
+#   --symlink  (default) creates a symlink from ~/.hermes/plugins/summarization-calendar
 #              pointing to the source directory.
 #   --copy     creates a real copy instead.
 #
 # Always snapshots any pre-existing plugin target into
-# ~/.hermes/backups/daily-ledger-install/<id>/ with manifest+payload layout.
-# Never touches ~/.hermes/daily-ledger data.
+# ~/.hermes/backups/summarization-calendar-install/<id>/ with manifest+payload layout.
+# Never touches ~/.hermes/summarization-calendar data.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_SRC="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
-PLUGIN_DIR="$HERMES_HOME/plugins/daily-ledger"
-BACKUP_ROOT="$HERMES_HOME/backups/daily-ledger-install"
-LEDGER_DIR="$HERMES_HOME/daily-ledger"
+PLUGIN_DIR="$HERMES_HOME/plugins/summarization-calendar"
+BACKUP_ROOT="$HERMES_HOME/backups/summarization-calendar-install"
+LEDGER_DIR="$HERMES_HOME/summarization-calendar"
+# v1.1.0-and-earlier install locations (rename migration + backup discovery).
+LEGACY_PLUGIN_DIR="$HERMES_HOME/plugins/daily-ledger"
+LEGACY_BACKUP_ROOT="$HERMES_HOME/backups/daily-ledger-install"
+LEGACY_LEDGER_DIR="$HERMES_HOME/daily-ledger"
 
 INSTALL_MODE="${1:---symlink}"
 
@@ -140,7 +144,7 @@ with open(sys.argv[7], 'w') as f:
 }
 
 # --- main ---
-echo "=== Daily Ledger Plugin Install ==="
+echo "=== Summarization Calendar Plugin Install ==="
 echo "Source:     $PLUGIN_SRC"
 echo "Plugin dir: $PLUGIN_DIR"
 echo "Mode:       $INSTALL_MODE"
@@ -150,11 +154,40 @@ echo ""
 validate_path_safety "$HERMES_HOME" "HERMES_HOME"
 validate_path_safety "$PLUGIN_DIR" "plugin_dir"
 
+# 1a. Migrate any legacy v1.1.0-and-earlier install (plugins/daily-ledger).
+# The legacy install is superseded by the v1.2.0 rename: it is snapshotted
+# into the new backup root and removed so it cannot coexist (and double-load)
+# alongside the renamed plugin. It is fully recoverable via
+# rollback-local.sh <id>.  Ledger DATA is never touched here — the backend
+# follows the pre-existing store in place (see recap_storage.get_ledger_root).
+if [ -e "$LEGACY_PLUGIN_DIR" ] || [ -L "$LEGACY_PLUGIN_DIR" ]; then
+    echo "Found legacy pre-rename install at $LEGACY_PLUGIN_DIR — migrating..."
+    validate_path_safety "$LEGACY_PLUGIN_DIR" "legacy_plugin_dir"
+    # Only validate paths that are real directories (symlinks we just record target)
+    if [ ! -L "$LEGACY_PLUGIN_DIR" ] && [ -d "$LEGACY_PLUGIN_DIR" ]; then
+        validate_safe "$LEGACY_PLUGIN_DIR" "legacy_plugin"
+    fi
+    LEGACY_ID="legacy-migration-$(ts)-$$"
+    LEGACY_BACKUP_PATH="$BACKUP_ROOT/$LEGACY_ID"
+    mkdir -p "$BACKUP_ROOT"
+    snapshot_target "$LEGACY_PLUGIN_DIR" "$LEGACY_BACKUP_PATH"
+    if [ -L "$LEGACY_PLUGIN_DIR" ]; then
+        rm -- "$LEGACY_PLUGIN_DIR"
+    elif [ -d "$LEGACY_PLUGIN_DIR" ]; then
+        rm -rf -- "$LEGACY_PLUGIN_DIR"
+    else
+        rm -- "$LEGACY_PLUGIN_DIR"
+    fi
+    echo "Legacy install backed up to: $LEGACY_BACKUP_PATH"
+    echo "Restore it with: rollback-local.sh $LEGACY_ID"
+    echo ""
+fi
+
 # 1. Build the replacement at a sibling staging path before touching current.
 PLUGIN_PARENT="$(dirname "$PLUGIN_DIR")"
 mkdir -p "$PLUGIN_PARENT"
-STAGE="$PLUGIN_PARENT/.daily-ledger-install-stage-$$"
-OLD="$PLUGIN_PARENT/.daily-ledger-install-old-$$"
+STAGE="$PLUGIN_PARENT/.summarization-calendar-install-stage-$$"
+OLD="$PLUGIN_PARENT/.summarization-calendar-install-old-$$"
 rm -rf -- "$STAGE" "$OLD"
 # Never remove OLD from an EXIT trap: if both the swap and automatic restore
 # fail, OLD is the only surviving copy and must remain recoverable.
@@ -212,7 +245,28 @@ fi
 # 4. Ensure ledger dirs exist (but never touch existing data)
 mkdir -p "$LEDGER_DIR/recaps" "$LEDGER_DIR/versions" "$LEDGER_DIR/running"
 
+# 5. Report the effective ledger data dir. If a pre-rename store with data
+# exists at the legacy location, the backend follows it in place (see
+# recap_storage.get_ledger_root) — report that, not the fresh scaffold.
+_effective_ledger_dir() {
+    local d sub
+    for d in "$LEDGER_DIR" "$LEGACY_LEDGER_DIR"; do
+        for sub in recaps versions session-versions rollup-versions; do
+            if [ -d "$d/$sub" ] && [ -n "$(ls -A -- "$d/$sub" 2>/dev/null | head -n 1)" ]; then
+                printf '%s\n' "$d"
+                return 0
+            fi
+        done
+    done
+    printf '%s\n' "$LEDGER_DIR"
+}
+EFFECTIVE_LEDGER="$(_effective_ledger_dir)"
+
 echo ""
 echo "=== Install complete ==="
-echo "Ledger data dir: $LEDGER_DIR"
+if [ "$EFFECTIVE_LEDGER" = "$LEGACY_LEDGER_DIR" ]; then
+    echo "Ledger data dir: $EFFECTIVE_LEDGER (existing pre-rename data, kept in place)"
+else
+    echo "Ledger data dir: $EFFECTIVE_LEDGER"
+fi
 echo "Restart Hermes Dashboard to load the plugin."

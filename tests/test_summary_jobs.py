@@ -10,7 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "dashboard"))
 
-import hermes_daily_ledger.summary_jobs as jobs
+import hermes_summarization_calendar.summary_jobs as jobs
 
 
 DATE = "2026-03-08"

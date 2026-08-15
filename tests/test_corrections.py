@@ -18,12 +18,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "dashboard"))
 
 import pytest
 
-from hermes_daily_ledger.contract import (
+from hermes_summarization_calendar.contract import (
     FingerprintComponent,
     compute_source_fingerprint,
 )
-from hermes_daily_ledger.dates import chicago_day_window_utc
-from hermes_daily_ledger.inventory import (
+from hermes_summarization_calendar.dates import chicago_day_window_utc
+from hermes_summarization_calendar.inventory import (
     build_day_inventory,
     check_health,
     discover_all,
@@ -51,22 +51,22 @@ class TestDateValidation:
         from fastapi import FastAPI
         os.environ["HERMES_HOME"] = str(home)
         app = FastAPI()
-        app.include_router(plugin_api.router, prefix="/api/plugins/daily-ledger")
+        app.include_router(plugin_api.router, prefix="/api/plugins/summarization-calendar")
         return TestClient(app)
 
     def test_feb_30_rejected(self, empty_hermes_home):
         client = self._app(empty_hermes_home)
-        resp = client.get("/api/plugins/daily-ledger/day?date=2026-02-30")
+        resp = client.get("/api/plugins/summarization-calendar/day?date=2026-02-30")
         assert resp.status_code == 400, f"Expected 400 for Feb 30, got {resp.status_code}"
 
     def test_feb_29_non_leap_rejected(self, empty_hermes_home):
         client = self._app(empty_hermes_home)
-        resp = client.get("/api/plugins/daily-ledger/day?date=2025-02-29")
+        resp = client.get("/api/plugins/summarization-calendar/day?date=2025-02-29")
         assert resp.status_code == 400, f"Expected 400 for Feb 29 non-leap, got {resp.status_code}"
 
     def test_feb_29_leap_accepted(self, empty_hermes_home):
         client = self._app(empty_hermes_home)
-        resp = client.get("/api/plugins/daily-ledger/day?date=2024-02-29")
+        resp = client.get("/api/plugins/summarization-calendar/day?date=2024-02-29")
         assert resp.status_code == 200
 
 
@@ -171,7 +171,7 @@ def cron_tz_home(tmp_path):
 class TestCronTimezoneComparison:
     def test_offset_timestamp_in_window(self, cron_tz_home):
         """claimed_at with -05:00 offset must be parsed and compared as UTC instants."""
-        from hermes_daily_ledger.inventory import CronRoot
+        from hermes_summarization_calendar.inventory import CronRoot
         cron_root = CronRoot(cron_dir=cron_tz_home, label="default")
         start_dt, end_dt = chicago_day_window_utc("2026-03-08")
 
@@ -182,7 +182,7 @@ class TestCronTimezoneComparison:
         assert "tz_exec_001" in ids, "Offset-aware execution not found"
 
     def test_z_suffix_in_window(self, cron_tz_home):
-        from hermes_daily_ledger.inventory import CronRoot
+        from hermes_summarization_calendar.inventory import CronRoot
         cron_root = CronRoot(cron_dir=cron_tz_home, label="default")
         start_dt, end_dt = chicago_day_window_utc("2026-03-08")
         runs, _ = query_day_cron_runs([cron_root], start_dt.timestamp(), end_dt.timestamp())
@@ -192,7 +192,7 @@ class TestCronTimezoneComparison:
 
     def test_invalid_timestamp_skipped(self, cron_tz_home):
         """Empty/invalid claimed_at should be skipped, not crash."""
-        from hermes_daily_ledger.inventory import CronRoot
+        from hermes_summarization_calendar.inventory import CronRoot
         cron_root = CronRoot(cron_dir=cron_tz_home, label="default")
         start_dt, end_dt = chicago_day_window_utc("2026-03-08")
         runs, _ = query_day_cron_runs([cron_root], start_dt.timestamp(), end_dt.timestamp())
@@ -201,7 +201,7 @@ class TestCronTimezoneComparison:
 
     def test_before_window_excluded(self, cron_tz_home):
         """04:00 UTC on Mar 8 is before Chicago midnight at 06:00Z."""
-        from hermes_daily_ledger.inventory import CronRoot
+        from hermes_summarization_calendar.inventory import CronRoot
         cron_root = CronRoot(cron_dir=cron_tz_home, label="default")
         start_dt, end_dt = chicago_day_window_utc("2026-03-08")
         runs, _ = query_day_cron_runs([cron_root], start_dt.timestamp(), end_dt.timestamp())
@@ -524,10 +524,10 @@ class TestNoPathsInAPI:
         from fastapi import FastAPI
         os.environ["HERMES_HOME"] = str(multi_cron_home)
         app = FastAPI()
-        app.include_router(plugin_api.router, prefix="/api/plugins/daily-ledger")
+        app.include_router(plugin_api.router, prefix="/api/plugins/summarization-calendar")
         client = TestClient(app)
 
-        resp = client.get("/api/plugins/daily-ledger/day?date=2026-03-08")
+        resp = client.get("/api/plugins/summarization-calendar/day?date=2026-03-08")
         assert resp.status_code == 200
         raw = json.dumps(resp.json())
         # No filesystem paths in cron runs or anywhere

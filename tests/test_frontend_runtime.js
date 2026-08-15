@@ -299,7 +299,7 @@ describe('Combined source safety', () => {
   });
 
   it('early return when SDK unavailable', () => {
-    var errIdx = SOURCE.indexOf("console.error('[daily-ledger]");
+    var errIdx = SOURCE.indexOf("console.error('[summarization-calendar]");
     var retIdx = SOURCE.indexOf('return;');
     assert.ok(errIdx >= 0 && retIdx > errIdx, 'Must log then return early');
   });

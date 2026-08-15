@@ -21,19 +21,19 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "dashboard"))
 
-from hermes_daily_ledger.auxiliary_runner import AuxiliaryResult
-from hermes_daily_ledger.chunker import _build_chunk_prompt, _build_session_chunk_prompt
-from hermes_daily_ledger.contract import DailySession
-from hermes_daily_ledger.recap_orchestrator import (
+from hermes_summarization_calendar.auxiliary_runner import AuxiliaryResult
+from hermes_summarization_calendar.chunker import _build_chunk_prompt, _build_session_chunk_prompt
+from hermes_summarization_calendar.contract import DailySession
+from hermes_summarization_calendar.recap_orchestrator import (
     _merge_chunk_session_summaries,
     _reconcile_inventory_transcripts,
 )
-from hermes_daily_ledger.recap_validator import SessionIdentity, validate_summary_output
-from hermes_daily_ledger.session_orchestrator import (
+from hermes_summarization_calendar.recap_validator import SessionIdentity, validate_summary_output
+from hermes_summarization_calendar.session_orchestrator import (
     _build_reduction_prompt as sop_build_reduction_prompt,
     _validated_item,
 )
-from hermes_daily_ledger.transcript import SessionTranscript, TranscriptMessage
+from hermes_summarization_calendar.transcript import SessionTranscript, TranscriptMessage
 
 
 def _daily(session_id: str, title: str) -> DailySession:

@@ -2,7 +2,7 @@
 
 Reads active user/assistant/tool messages from canonical profile DB paths
 using URI mode=ro + query_only. Excludes system prompts, reasoning fields,
-and sessions with source='daily-ledger'. Never returns raw transcripts in
+and sessions with source='summarization-calendar'. Never returns raw transcripts in
 HTTP responses — data stays server-side and is only used to build the
 prompt payload for the LLM compression task.
 """
@@ -15,13 +15,18 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from hermes_daily_ledger.inventory import ProfileSource
+    from hermes_summarization_calendar.inventory import ProfileSource
 
 # Only these roles carry content useful for a faithful recap
 _ALLOWED_ROLES = {"user", "assistant", "tool"}
 
-# Plugin-internal sessions that must never be recapped
-_PLUGIN_SOURCE = "daily-ledger"
+# Plugin-internal sessions that must never be recapped.
+# "summarization-calendar" is the current tag; "daily-ledger" is the legacy
+# tag from v1.1.0-and-earlier installs. Both are excluded so pre-rename
+# recap sessions are never fed back into new recap generation.
+_PLUGIN_SOURCE = "summarization-calendar"
+_LEGACY_PLUGIN_SOURCE = "daily-ledger"
+_PLUGIN_SOURCES = (_PLUGIN_SOURCE, _LEGACY_PLUGIN_SOURCE)
 
 
 @dataclass(frozen=True)
@@ -65,7 +70,7 @@ def collect_session_transcript(
     """Collect active messages for *session_id* within the day window.
 
     Returns ``None`` if the session does not exist or has no eligible messages.
-    Excludes role='system', reasoning columns, and source='daily-ledger'.
+    Excludes role='system', reasoning columns, and source='summarization-calendar'.
     """
     conn = _open_readonly(db_path)
     try:
@@ -78,7 +83,7 @@ def collect_session_transcript(
             return None
 
         source = row["source"] or ""
-        if source == _PLUGIN_SOURCE:
+        if source in _PLUGIN_SOURCES:
             return None
 
         title = (row["title"] or "").strip()
@@ -145,11 +150,11 @@ def collect_day_transcripts(
             WHERE m.active = 1
               AND m.timestamp >= ?
               AND m.timestamp < ?
-              AND (s.source != ? OR s.source IS NULL)
+              AND (s.source NOT IN (?, ?) OR s.source IS NULL)
             ORDER BY s.id
         """
         rows = conn.execute(
-            query, (start_utc, end_utc, _PLUGIN_SOURCE)
+            query, (start_utc, end_utc, *_PLUGIN_SOURCES)
         ).fetchall()
 
         transcripts: list[SessionTranscript] = []
@@ -179,7 +184,7 @@ def collect_all_day_transcripts(
     Returns a flat list sorted by (profile, session_id) for determinism.
     Import ProfileSource locally to avoid circular deps when tests mock it.
     """
-    from hermes_daily_ledger.inventory import ProfileSource  # noqa: PLC2801
+    from hermes_summarization_calendar.inventory import ProfileSource  # noqa: PLC2801
 
     all_transcripts: list[SessionTranscript] = []
 

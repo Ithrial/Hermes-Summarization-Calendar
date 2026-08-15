@@ -77,8 +77,8 @@ All inputs are query parameters validated before discovery or filesystem access:
 **Objective:** Produce deterministic per-session source fingerprints during the existing read-only inventory query without loading transcripts again.
 
 **Files:**
-- Modify: `dashboard/hermes_daily_ledger/contract.py`
-- Modify: `dashboard/hermes_daily_ledger/inventory.py`
+- Modify: `dashboard/hermes_summarization_calendar/contract.py`
+- Modify: `dashboard/hermes_summarization_calendar/inventory.py`
 - Modify: `tests/test_inventory.py`
 - Modify: `tests/test_api.py`
 
@@ -96,9 +96,9 @@ All inputs are query parameters validated before discovery or filesystem access:
 **Objective:** Add failure-atomic, versioned artifact storage without modifying legacy recap data.
 
 **Files:**
-- Create: `dashboard/hermes_daily_ledger/session_storage.py`
+- Create: `dashboard/hermes_summarization_calendar/session_storage.py`
 - Create: `tests/test_session_storage.py`
-- Reuse read-only helpers from: `dashboard/hermes_daily_ledger/recap_storage.py`
+- Reuse read-only helpers from: `dashboard/hermes_summarization_calendar/recap_storage.py`
 
 **Steps:**
 1. Write failing tests for deterministic artifact keys, path traversal resistance, atomic first save, regeneration version preservation, pointer-swap failure rollback, concurrent version collision, load/list/rollback, permissions, and missing/corrupt metadata.
@@ -113,7 +113,7 @@ All inputs are query parameters validated before discovery or filesystem access:
 **Objective:** Track independent session and roll-up jobs with restart recovery and bounded global concurrency.
 
 **Files:**
-- Create: `dashboard/hermes_daily_ledger/summary_jobs.py`
+- Create: `dashboard/hermes_summarization_calendar/summary_jobs.py`
 - Create: `tests/test_summary_jobs.py`
 - Modify: `dashboard/plugin_api.py`
 
@@ -130,10 +130,10 @@ All inputs are query parameters validated before discovery or filesystem access:
 **Objective:** Generate, validate, reduce, and atomically save one canonical session summary.
 
 **Files:**
-- Create: `dashboard/hermes_daily_ledger/session_orchestrator.py`
-- Modify: `dashboard/hermes_daily_ledger/transcript.py`
-- Modify: `dashboard/hermes_daily_ledger/chunker.py`
-- Reuse: `dashboard/hermes_daily_ledger/auxiliary_runner.py`
+- Create: `dashboard/hermes_summarization_calendar/session_orchestrator.py`
+- Modify: `dashboard/hermes_summarization_calendar/transcript.py`
+- Modify: `dashboard/hermes_summarization_calendar/chunker.py`
+- Reuse: `dashboard/hermes_summarization_calendar/auxiliary_runner.py`
 - Create: `tests/test_session_orchestrator.py`
 
 **Steps:**
@@ -151,7 +151,7 @@ All inputs are query parameters validated before discovery or filesystem access:
 **Objective:** Generate an optional day narrative without reading raw transcripts.
 
 **Files:**
-- Create: `dashboard/hermes_daily_ledger/rollup_orchestrator.py`
+- Create: `dashboard/hermes_summarization_calendar/rollup_orchestrator.py`
 - Create: `tests/test_rollup_orchestrator.py`
 
 **Steps:**
@@ -218,7 +218,7 @@ All inputs are query parameters validated before discovery or filesystem access:
 6. Exercise an oversized real session and verify one-identity chunk/reduction behavior.
 7. Generate a daily roll-up and prove its compression input came only from saved summaries plus compact cron metadata.
 8. Verify stale detection using a disposable fixture or injected test source, not by mutating live Hermes session databases.
-9. Exercise rollback/uninstall/reinstall while preserving `~/.hermes/daily-ledger`.
+9. Exercise rollback/uninstall/reinstall while preserving `~/.hermes/summarization-calendar`.
 10. Only after every gate passes, prepare publication artifacts.
 
 ---

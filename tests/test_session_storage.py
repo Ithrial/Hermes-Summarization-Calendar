@@ -14,7 +14,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "dashboard"))
 
-from hermes_daily_ledger.session_storage import (
+from hermes_summarization_calendar.session_storage import (
     SummaryVersion,
     artifact_key,
     check_session_staleness,
@@ -128,7 +128,7 @@ def test_pointer_swap_failure_preserves_current(ledger_root: Path) -> None:
     )
 
     with patch(
-        "hermes_daily_ledger.session_storage._install_strict_current_pointer",
+        "hermes_summarization_calendar.session_storage._install_strict_current_pointer",
         side_effect=OSError("simulated pointer failure"),
     ):
         with pytest.raises(OSError, match="pointer failure"):
@@ -144,7 +144,7 @@ def test_pointer_swap_failure_preserves_current(ledger_root: Path) -> None:
 
 def test_version_collision_fails_closed_without_overwrite(ledger_root: Path) -> None:
     fixed = "20260308T120000Z_123456_abcdef123456"
-    with patch("hermes_daily_ledger.session_storage._new_version_id", return_value=fixed):
+    with patch("hermes_summarization_calendar.session_storage._new_version_id", return_value=fixed):
         save_session_summary(
             DATE, PROFILE, SESSION_ID, "Title", _data("v1"), "sha256:v1",
             ledger_root=ledger_root,

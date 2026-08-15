@@ -1,6 +1,6 @@
 # Contributing
 
-Hermes Daily Ledger is a standalone Web Dashboard plugin. Keep changes inside this repository; Hermes Agent core is a read-only dependency and must not be patched to make this plugin work.
+Hermes Summarization Calendar is a standalone Web Dashboard plugin. Keep changes inside this repository; Hermes Agent core is a read-only dependency and must not be patched to make this plugin work.
 
 ## Development setup
 

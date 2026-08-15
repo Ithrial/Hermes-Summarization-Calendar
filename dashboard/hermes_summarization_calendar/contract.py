@@ -1,4 +1,4 @@
-"""Frozen API contract for Hermes Daily Ledger.
+"""Frozen API contract for Hermes Summarization Calendar.
 
 This module defines every JSON type that frontend/recap workers consume
 from the plugin API.  After the initial commit no consumer should need

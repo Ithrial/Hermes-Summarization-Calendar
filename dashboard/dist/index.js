@@ -3,7 +3,7 @@
 
   var SDK = window.__HERMES_PLUGIN_SDK__;
   if (!SDK || !window.__HERMES_PLUGINS__) {
-    console.error('[daily-ledger] Plugin SDK not available — cannot register Calendar plugin.');
+    console.error('[summarization-calendar] Plugin SDK not available — cannot register Calendar plugin.');
     return;
   }
 
@@ -109,7 +109,11 @@
     return str.substring(0, maxLen) + '\u2026';
   }
 
-  var SHOW_AUTO_TITLED_STORAGE_KEY = 'hermes.daily-ledger.showAutoTitled';
+  var SHOW_AUTO_TITLED_STORAGE_KEY = 'hermes.summarization-calendar.showAutoTitled';
+  // Legacy key from the v1.1.0-and-earlier "daily-ledger" naming. Read-only
+  // fallback so a preference set before the rename survives it; saves always
+  // write the new key, which shadows the legacy one.
+  var LEGACY_SHOW_AUTO_TITLED_STORAGE_KEY = 'hermes.daily-ledger.showAutoTitled';
   var AUTO_TITLED_SESSION_RE = /^Session \d{8}_\d{6}_[A-Za-z0-9_-]+$/;
 
   function isAutoTitledSession(title) {
@@ -141,6 +145,11 @@
     try {
       if (!storage || typeof storage.getItem !== 'function') return true;
       var value = storage.getItem(SHOW_AUTO_TITLED_STORAGE_KEY);
+      if (value === null || value === undefined) {
+        // Fall back to the pre-rename key so an existing preference
+        // (e.g. "hide auto-titled rows") survives the plugin rename.
+        value = storage.getItem(LEGACY_SHOW_AUTO_TITLED_STORAGE_KEY);
+      }
       if (value === 'false') return false;
       if (value === 'true') return true;
     } catch (_err) { /* browser storage may be unavailable */ }
@@ -169,7 +178,7 @@
   // API helpers
   // -----------------------------------------------------------------------
 
-  var API_BASE = '/api/plugins/daily-ledger';
+  var API_BASE = '/api/plugins/summarization-calendar';
 
   function apiGet(path) {
     return fetchJSON(API_BASE + path);
@@ -989,7 +998,7 @@
       apiGet('/health').then(function (data) {
         setState(function (s) { return Object.assign({}, s, { health: data }); });
       }).catch(function (err) {
-        console.warn('[daily-ledger] Health check failed:', err);
+        console.warn('[summarization-calendar] Health check failed:', err);
       });
     }, [setState]);
 
@@ -1639,9 +1648,9 @@
   // -----------------------------------------------------------------------
 
   try {
-    window.__HERMES_PLUGINS__.register('daily-ledger', CalendarPage);
+    window.__HERMES_PLUGINS__.register('summarization-calendar', CalendarPage);
   } catch (e) {
-    console.error('[daily-ledger] Failed to register plugin:', String(e.message || e));
+    console.error('[summarization-calendar] Failed to register plugin:', String(e.message || e));
   }
 
 })();

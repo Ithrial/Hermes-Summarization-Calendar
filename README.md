@@ -1,10 +1,10 @@
-# Hermes Daily Ledger
+# Hermes Summarization Calendar
 
 A standalone Hermes Web Dashboard plugin that adds a Calendar page for browsing daily session and cron activity, generating manual per-session summaries, and optionally creating a daily roll-up from saved summaries.
 
 ![Hermes Calendar Plugin](./Hermes%20Summarization%20Calendar.png)
 
-Daily Ledger does not patch Hermes core. It inventories Hermes session and cron stores read-only and writes its own versioned artifacts under the active `HERMES_HOME`.
+Summarization Calendar does not patch Hermes core. It inventories Hermes session and cron stores read-only and writes its own versioned artifacts under the active `HERMES_HOME`.
 
 ## v1.1 behavior
 
@@ -35,7 +35,7 @@ The v1.1 release was validated on Hermes Agent v0.19.0 (2026.7.20), Python 3.11,
 Hermes discovers dashboard plugins at:
 
 ```text
-$HERMES_HOME/plugins/daily-ledger/dashboard/manifest.json
+$HERMES_HOME/plugins/summarization-calendar/dashboard/manifest.json
 ```
 
 For this standalone Dashboard extension, `dashboard/manifest.json` is the canonical package manifest. A root `plugin.yaml` or `plugin.json` is not required by the Dashboard plugin contract.
@@ -53,8 +53,8 @@ sha256sum -c SHA256SUMS
 Extract it anywhere, then install an atomic copy:
 
 ```bash
-tar -xzf hermes-daily-ledger-v1.0.0.tar.gz
-cd hermes-daily-ledger-v1.0.0
+tar -xzf hermes-summarization-calendar-v1.0.0.tar.gz
+cd hermes-summarization-calendar-v1.0.0
 ./scripts/install-local.sh --copy
 ```
 
@@ -66,7 +66,7 @@ Either clone directly into the Hermes plugin path:
 
 ```bash
 mkdir -p "${HERMES_HOME:-$HOME/.hermes}/plugins"
-git clone https://github.com/Ithrial/Hermes-Summarization-Calendar.git "${HERMES_HOME:-$HOME/.hermes}/plugins/daily-ledger"
+git clone https://github.com/Ithrial/Hermes-Summarization-Calendar.git "${HERMES_HOME:-$HOME/.hermes}/plugins/summarization-calendar"
 ```
 
 Or clone elsewhere and run:
@@ -84,7 +84,7 @@ Do not restart the Hermes messaging gateway for a Dashboard-only plugin change.
 Then open the Dashboard and select `Calendar`. The plugin health route is:
 
 ```text
-GET /api/plugins/daily-ledger/health
+GET /api/plugins/summarization-calendar/health
 ```
 
 ## Configure summarization
@@ -99,7 +99,7 @@ auxiliary.compression.timeout
 auxiliary.compression.reasoning_effort
 ```
 
-Configure that route with Hermes itself. Daily Ledger never writes global model configuration and does not silently substitute a plugin-owned backend.
+Configure that route with Hermes itself. Summarization Calendar never writes global model configuration and does not silently substitute a plugin-owned backend.
 
 When a summary is requested, the selected day's transcript slice is sent to the configured compression model. Review `SECURITY.md` before using a remote provider.
 
@@ -108,13 +108,13 @@ When a summary is requested, the selected day's transcript slice is sent to the 
 Runtime code:
 
 ```text
-$HERMES_HOME/plugins/daily-ledger/
+$HERMES_HOME/plugins/summarization-calendar/
 ```
 
 Generated data:
 
 ```text
-$HERMES_HOME/daily-ledger/
+$HERMES_HOME/summarization-calendar/
   session-versions/
   rollup-versions/
   running/
@@ -123,7 +123,9 @@ $HERMES_HOME/daily-ledger/
 
 Source stores are opened read-only. Generated summaries are separate from plugin code and are preserved by default across install, upgrade, rollback, and uninstall.
 
-The release archive never contains your Hermes configuration, credentials, sessions, cron database, logs, or generated Daily Ledger artifacts.
+> **Upgrading from v1.1.0 and earlier?** Existing generated data under `$HERMES_HOME/daily-ledger/` is followed in place — nothing is copied or moved, and recaps remain readable. A pre-rename `plugins/daily-ledger` install is automatically backed up and removed by `install-local.sh` (restore it with `rollback-local.sh`). Run `./scripts/status-local.sh` to see which store the plugin is currently using.
+
+The release archive never contains your Hermes configuration, credentials, sessions, cron database, logs, or generated Summarization Calendar artifacts.
 
 ## Status, upgrade, rollback, and uninstall
 
@@ -142,7 +144,7 @@ Upgrade from a new checkout or extracted release:
 A pre-existing installation is snapshotted under:
 
 ```text
-$HERMES_HOME/backups/daily-ledger-install/
+$HERMES_HOME/backups/summarization-calendar-install/
 ```
 
 List rollback IDs:

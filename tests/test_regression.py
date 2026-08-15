@@ -31,7 +31,7 @@ import pytest
 
 # --- Import modules under test ---
 try:
-    from hermes_daily_ledger.recap_storage import (
+    from hermes_summarization_calendar.recap_storage import (
         save_recap,
         load_recap,
         rollback_to_version,
@@ -46,7 +46,7 @@ except ImportError:
     HAS_STORAGE = False
 
 try:
-    from hermes_daily_ledger.chunker import (
+    from hermes_summarization_calendar.chunker import (
         chunk_transcripts,
         build_synthesis_prompt,
     )
@@ -55,7 +55,7 @@ except ImportError:
     HAS_CHUNKER = False
 
 try:
-    from hermes_daily_ledger.transcript import TranscriptMessage
+    from hermes_summarization_calendar.transcript import TranscriptMessage
     HAS_TRANSCRIPT = True
 except ImportError:
     HAS_TRANSCRIPT = False
@@ -74,9 +74,9 @@ class TestRollbackLegacyFlatBackup:
         script = scripts_dir / "rollback-local.sh"
 
         hermes_home = tmp_path / ".hermes"
-        (hermes_home / "backups" / "daily-ledger-install").mkdir(parents=True)
+        (hermes_home / "backups" / "summarization-calendar-install").mkdir(parents=True)
         backup_id = "20260701T120000Z-12345"
-        backup_dir = hermes_home / "backups" / "daily-ledger-install" / backup_id
+        backup_dir = hermes_home / "backups" / "summarization-calendar-install" / backup_id
         backup_dir.mkdir()
 
         manifest = {
@@ -107,11 +107,11 @@ class TestRollbackLegacyFlatBackup:
         script = scripts_dir / "rollback-local.sh"
 
         hermes_home = tmp_path / ".hermes"
-        plugin_dir = hermes_home / "plugins" / "daily-ledger"
-        (hermes_home / "backups" / "daily-ledger-install").mkdir(parents=True)
+        plugin_dir = hermes_home / "plugins" / "summarization-calendar"
+        (hermes_home / "backups" / "summarization-calendar-install").mkdir(parents=True)
 
         backup_id = "legacy-flat-12345"
-        backup_dir = hermes_home / "backups" / "daily-ledger-install" / backup_id
+        backup_dir = hermes_home / "backups" / "summarization-calendar-install" / backup_id
         backup_dir.mkdir()
 
         manifest = {
@@ -168,7 +168,7 @@ class TestShellBackupSafety:
         script = scripts_dir / "install-local.sh"
 
         hermes_home = tmp_path / ".hermes"
-        plugin_dir = hermes_home / "plugins" / "daily-ledger"
+        plugin_dir = hermes_home / "plugins" / "summarization-calendar"
         (plugin_dir.parent).mkdir(parents=True)
         # Pre-existing symlink
         plugin_dir.symlink_to("/existing/target")
@@ -180,7 +180,7 @@ class TestShellBackupSafety:
         )
 
         assert result.returncode == 0, f"Install failed: {result.stderr}"
-        backup_root = hermes_home / "backups" / "daily-ledger-install"
+        backup_root = hermes_home / "backups" / "summarization-calendar-install"
         manifests = list(backup_root.glob("*/manifest.json")) if backup_root.is_dir() else []
         assert manifests, "No backup manifest created"
 
@@ -194,7 +194,7 @@ class TestShellBackupSafety:
         script = scripts_dir / "install-local.sh"
 
         hermes_home = tmp_path / ".hermes"
-        plugin_dir = hermes_home / "plugins" / "daily-ledger"
+        plugin_dir = hermes_home / "plugins" / "summarization-calendar"
         (plugin_dir.parent).mkdir(parents=True)
 
         plugin_dir.mkdir()
@@ -207,7 +207,7 @@ class TestShellBackupSafety:
         )
 
         assert result.returncode == 0
-        backup_root = hermes_home / "backups" / "daily-ledger-install"
+        backup_root = hermes_home / "backups" / "summarization-calendar-install"
         manifests = list(backup_root.glob("*/manifest.json")) if backup_root.is_dir() else []
         assert manifests
         # Must parse as valid JSON (shell interpolation would break)
@@ -220,7 +220,7 @@ class TestShellBackupSafety:
         script = scripts_dir / "rollback-local.sh"
 
         hermes_home = tmp_path / ".hermes"
-        (hermes_home / "backups" / "daily-ledger-install").mkdir(parents=True)
+        (hermes_home / "backups" / "summarization-calendar-install").mkdir(parents=True)
 
         for bad_id in ["../etc", "..backup", "a/b/c"]:
             result = subprocess.run(
@@ -236,7 +236,7 @@ class TestShellBackupSafety:
         script = scripts_dir / "install-local.sh"
 
         hermes_home = tmp_path / ".hermes"
-        plugin_dir = hermes_home / "plugins" / "daily-ledger"
+        plugin_dir = hermes_home / "plugins" / "summarization-calendar"
         (plugin_dir.parent).mkdir(parents=True)
 
         # Broken symlink
@@ -250,7 +250,7 @@ class TestShellBackupSafety:
         )
 
         assert result.returncode == 0, f"Install failed: {result.stderr}"
-        backup_root = hermes_home / "backups" / "daily-ledger-install"
+        backup_root = hermes_home / "backups" / "summarization-calendar-install"
         manifests = list(backup_root.glob("*/manifest.json")) if backup_root.is_dir() else []
         assert manifests, "No manifest for broken symlink"
 
@@ -267,7 +267,7 @@ class TestShellBackupSafety:
         script = scripts_dir / "install-local.sh"
 
         hermes_home = tmp_path / ".hermes"
-        plugin_dir = hermes_home / "plugins" / "daily-ledger"
+        plugin_dir = hermes_home / "plugins" / "summarization-calendar"
         (plugin_dir.parent).mkdir(parents=True)
 
         plugin_dir.mkdir()
@@ -277,7 +277,7 @@ class TestShellBackupSafety:
                        capture_output=True, text=True, timeout=10,
                        env={**os.environ, "HERMES_HOME": str(hermes_home)})
 
-        backup_root = hermes_home / "backups" / "daily-ledger-install"
+        backup_root = hermes_home / "backups" / "summarization-calendar-install"
         backups_after_first = list(backup_root.glob("*/")) if backup_root.is_dir() else []
         assert len(backups_after_first) == 1
 
@@ -317,7 +317,7 @@ class TestSaveRecapAtomicity:
         (existing_dir / "meta.json").write_text('{"date":"2026-07-20"}')
 
         # Mock _atomic_write_json to fail on the version dir write
-        with patch("hermes_daily_ledger.recap_storage._atomic_write_json",
+        with patch("hermes_summarization_calendar.recap_storage._atomic_write_json",
                    side_effect=OSError("injected failure")):
             data = {
                 "session_summaries": [{"session_id": "s1", "title": "T1", "summary": "S1"}],
@@ -467,7 +467,7 @@ class TestVersionIdFormat:
         """Version write failure raises OSError, not logs-and-succeeds."""
         ledger_root = tmp_path / "ledger"
 
-        with patch("hermes_daily_ledger.recap_storage._atomic_write_json",
+        with patch("hermes_summarization_calendar.recap_storage._atomic_write_json",
                    side_effect=OSError("injected")):
             data = {
                 "session_summaries": [{"session_id": "s1", "title": "T", "summary": "S"}],
@@ -710,7 +710,7 @@ class TestStaticScan:
     """Source code static analysis for security patterns."""
 
     def _py_files(self):
-        dashboard_dir = Path(__file__).parent.parent / "dashboard" / "hermes_daily_ledger"
+        dashboard_dir = Path(__file__).parent.parent / "dashboard" / "hermes_summarization_calendar"
         return list(dashboard_dir.rglob("*.py"))
 
     def test_no_shell_true_in_python(self):
@@ -760,7 +760,7 @@ class TestSQLiteSafety:
 
     def test_transcript_reads_are_select_only(self):
         """transcript.py only uses SELECT on source DBs."""
-        tx_path = Path(__file__).parent.parent / "dashboard" / "hermes_daily_ledger" / "transcript.py"
+        tx_path = Path(__file__).parent.parent / "dashboard" / "hermes_summarization_calendar" / "transcript.py"
         content = tx_path.read_text()
         write_ops = re.findall(r'\b(INSERT|UPDATE|DELETE)\s+INTO', content, re.IGNORECASE)
         assert not write_ops, f"Write ops in transcript.py: {write_ops}"

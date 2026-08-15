@@ -218,7 +218,7 @@ def _render_markdown(kind: str, data: dict[str, Any], meta: dict[str, Any]) -> s
     coverage: dict[str, Any] = raw_coverage if isinstance(raw_coverage, dict) else {}
     return "\n".join(
         [
-            f"# Daily Ledger Roll-up — {meta['date']}",
+            f"# Summarization Calendar Roll-up — {meta['date']}",
             "",
             f"- Generated: {meta['generated_at']}",
             f"- Coverage: {coverage.get('included', 0)} of {coverage.get('active', 0)} sessions",

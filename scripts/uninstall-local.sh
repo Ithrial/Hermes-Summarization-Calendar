@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
-# uninstall-local.sh — Remove daily-ledger plugin while preserving ledger data.
+# uninstall-local.sh — Remove summarization-calendar plugin while preserving ledger data.
 #
 # Snapshots current state with manifest+payload layout before removal.
 # Usage: ./uninstall-local.sh [--remove-data]
-#   By default preserves ~/.hermes/daily-ledger contents.
+#   By default preserves ~/.hermes/summarization-calendar contents.
 #   --remove-data also removes the ledger data directory (destructive).
 set -euo pipefail
 
 HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
-PLUGIN_DIR="$HERMES_HOME/plugins/daily-ledger"
-LEDGER_DIR="$HERMES_HOME/daily-ledger"
-BACKUP_ROOT="$HERMES_HOME/backups/daily-ledger-install"
+PLUGIN_DIR="$HERMES_HOME/plugins/summarization-calendar"
+LEDGER_DIR="$HERMES_HOME/summarization-calendar"
+LEGACY_LEDGER_DIR="$HERMES_HOME/daily-ledger"
+BACKUP_ROOT="$HERMES_HOME/backups/summarization-calendar-install"
 
 REMOVE_DATA="${1:---keep-data}"
 
@@ -72,7 +73,7 @@ with open(sys.argv[7], 'w', encoding='utf-8') as handle:
     echo "Uninstall snapshot saved to: $dest"
 }
 
-echo "=== Daily Ledger Plugin Uninstall ==="
+echo "=== Summarization Calendar Plugin Uninstall ==="
 
 # Validate plugin exists
 if [ ! -e "$PLUGIN_DIR" ] && [ ! -L "$PLUGIN_DIR" ]; then
@@ -102,31 +103,44 @@ elif [ -f "$PLUGIN_DIR" ]; then
     echo "Removed plugin file: $PLUGIN_DIR"
 fi
 
-# Handle ledger data
+# Handle ledger data. The effective store may be the new root or the legacy
+# pre-rename root (whichever holds data — see recap_storage.get_ledger_root).
+# --remove-data is explicit and destructive: it removes BOTH roots so a
+# --remove-data uninstall never leaves a stranded pre-rename store behind.
 case "$REMOVE_DATA" in
     --remove-data|-r)
         if [ -d "$LEDGER_DIR" ]; then
             rm -rf -- "$LEDGER_DIR"
             echo "Removed ledger data: $LEDGER_DIR"
         fi
+        if [ -d "$LEGACY_LEDGER_DIR" ]; then
+            rm -rf -- "$LEGACY_LEDGER_DIR"
+            echo "Removed legacy ledger data: $LEGACY_LEDGER_DIR"
+        fi
         ;;
     *)
-        echo ""
-        echo "Ledger data PRESERVED at: $LEDGER_DIR"
+        # Report on whichever store actually holds data (new first).
         if [ -d "$LEDGER_DIR" ]; then
-            python3 - "$LEDGER_DIR" <<'PY'
+            echo ""
+            echo "Ledger data PRESERVED at: $LEDGER_DIR"
+            python3 - "$LEDGER_DIR" "$LEGACY_LEDGER_DIR" <<'PY'
 import sys
 from pathlib import Path
 
-root = Path(sys.argv[1])
-
-def count_meta(relative: str) -> int:
+def count_meta(root: Path, relative: str) -> int:
     base = root / relative
     return sum(1 for _ in base.rglob("meta.json")) if base.is_dir() else 0
 
-print(f"  Session versions preserved: {count_meta('session-versions')}")
-print(f"  Roll-up versions preserved: {count_meta('rollup-versions')}")
+new_root = Path(sys.argv[1])
+legacy_root = Path(sys.argv[2])
+session = count_meta(new_root, "session-versions") + count_meta(legacy_root, "session-versions")
+rollup = count_meta(new_root, "rollup-versions") + count_meta(legacy_root, "rollup-versions")
+print(f"  Session versions preserved: {session}")
+print(f"  Roll-up versions preserved: {rollup}")
 PY
+        elif [ -d "$LEGACY_LEDGER_DIR" ]; then
+            echo ""
+            echo "Ledger data PRESERVED at: $LEGACY_LEDGER_DIR (pre-rename store)"
         fi
         ;;
 esac

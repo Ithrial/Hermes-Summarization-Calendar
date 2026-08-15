@@ -45,7 +45,7 @@ class TestInstallBackupLayout:
         hermes_home = tmp_path / "hermes"
         hermes_home.mkdir()
         # Create a pre-existing plugin as a directory with content
-        old_plugin = hermes_home / "plugins" / "daily-ledger"
+        old_plugin = hermes_home / "plugins" / "summarization-calendar"
         old_plugin.mkdir(parents=True)
         (old_plugin / "config.yaml").write_text("key: value")
 
@@ -54,7 +54,7 @@ class TestInstallBackupLayout:
         assert result.returncode == 0, f"install failed: {result.stderr}"
 
         # Backup should exist with manifest+payload layout
-        backup_root = hermes_home / "backups" / "daily-ledger-install"
+        backup_root = hermes_home / "backups" / "summarization-calendar-install"
         backups = list(backup_root.iterdir())
         assert len(backups) == 1, f"Expected 1 backup, found {len(backups)}"
 
@@ -84,7 +84,7 @@ class TestInstallBackupLayout:
         src_dir.mkdir()
         (src_dir / "old.py").write_text("# v1")
 
-        plugin_dir = hermes_home / "plugins" / "daily-ledger"
+        plugin_dir = hermes_home / "plugins" / "summarization-calendar"
         plugin_dir.parent.mkdir(parents=True)
         plugin_dir.symlink_to(src_dir)
 
@@ -92,7 +92,7 @@ class TestInstallBackupLayout:
         result = run_script("install-local.sh", ["--symlink"], env=env)
         assert result.returncode == 0, f"install failed: {result.stderr}"
 
-        backup_root = hermes_home / "backups" / "daily-ledger-install"
+        backup_root = hermes_home / "backups" / "summarization-calendar-install"
         backup_dir = list(backup_root.iterdir())[0]
         manifest = json.loads((backup_dir / "manifest.json").read_text())
 
@@ -112,7 +112,7 @@ class TestInstallBackupLayout:
         gone_dir.mkdir()
         (gone_dir / "something.py").write_text("# gone soon")
 
-        plugin_dir = hermes_home / "plugins" / "daily-ledger"
+        plugin_dir = hermes_home / "plugins" / "summarization-calendar"
         plugin_dir.parent.mkdir(parents=True)
         plugin_dir.symlink_to(gone_dir)
 
@@ -127,7 +127,7 @@ class TestInstallBackupLayout:
         assert result.returncode == 0, f"Broken symlink install failed: {result.stderr}"
 
         # Backup should still exist with symlink target recorded
-        backup_root = hermes_home / "backups" / "daily-ledger-install"
+        backup_root = hermes_home / "backups" / "summarization-calendar-install"
         backup_dir = list(backup_root.iterdir())[0]
         manifest = json.loads((backup_dir / "manifest.json").read_text())
         assert manifest["previous_type"] == "symlink"
@@ -148,7 +148,7 @@ class TestInstallBackupLayout:
         r3 = run_script("install-local.sh", ["--symlink"], env=env)
         assert r3.returncode == 0, f"Third install failed: {r3.stderr}"
 
-        backup_root = hermes_home / "backups" / "daily-ledger-install"
+        backup_root = hermes_home / "backups" / "summarization-calendar-install"
         backups = sorted(backup_root.iterdir())
         # First install is clean (no pre-existing), so only 2 backups for upgrades
         assert len(backups) == 2, f"Expected 2 backups (first was clean), got {len(backups)}"
@@ -158,7 +158,7 @@ class TestInstallBackupLayout:
         hermes_home = tmp_path / "hermes"
         hermes_home.mkdir()
 
-        ledger_dir = hermes_home / "daily-ledger"
+        ledger_dir = hermes_home / "summarization-calendar"
         (ledger_dir / "recaps" / "2026-03-08").mkdir(parents=True)
         (ledger_dir / "recaps" / "2026-03-08" / "meta.json").write_text('{"date":"2026-03-08"}')
 
@@ -194,13 +194,13 @@ class TestRollbackBackupLayout:
         """Rollback to a directory backup restores files from payload/."""
         ctx = self._setup_upgrade(tmp_path)
         hermes_home = ctx["hermes_home"]
-        plugin_dir = hermes_home / "plugins" / "daily-ledger"
+        plugin_dir = hermes_home / "plugins" / "summarization-calendar"
 
         # Currently a symlink after upgrade
         assert plugin_dir.is_symlink()
 
         # Find the directory backup (from copy install)
-        backup_root = hermes_home / "backups" / "daily-ledger-install"
+        backup_root = hermes_home / "backups" / "summarization-calendar-install"
         v1_backup = None
         for b in sorted(backup_root.iterdir()):
             m = json.loads((b / "manifest.json").read_text())
@@ -225,7 +225,7 @@ class TestRollbackBackupLayout:
         ctx = self._setup_upgrade(tmp_path)
         hermes_home = ctx["hermes_home"]
 
-        plugin_dir = hermes_home / "plugins" / "daily-ledger"
+        plugin_dir = hermes_home / "plugins" / "summarization-calendar"
         assert plugin_dir.is_symlink()
         current_target = str(plugin_dir.resolve())
 
@@ -234,7 +234,7 @@ class TestRollbackBackupLayout:
         assert r.returncode == 0, f"Copy install failed: {r.stderr}"
 
         # Find the symlink backup
-        backup_root = hermes_home / "backups" / "daily-ledger-install"
+        backup_root = hermes_home / "backups" / "summarization-calendar-install"
         v2_backup = None
         for b in sorted(backup_root.iterdir()):
             m = json.loads((b / "manifest.json").read_text())
@@ -258,7 +258,7 @@ class TestRollbackBackupLayout:
         ctx = self._setup_upgrade(tmp_path)
         hermes_home = ctx["hermes_home"]
 
-        backup_root = hermes_home / "backups" / "daily-ledger-install"
+        backup_root = hermes_home / "backups" / "summarization-calendar-install"
         before_count = len(list(backup_root.iterdir()))
 
         # Find v1 directory backup to rollback to
@@ -291,14 +291,14 @@ class TestUninstallBackupLayout:
         run_script("install-local.sh", ["--copy"], env=env)
 
         # Create ledger data
-        ledger_dir = hermes_home / "daily-ledger"
+        ledger_dir = hermes_home / "summarization-calendar"
         (ledger_dir / "recaps" / "2026-03-08").mkdir(parents=True)
         (ledger_dir / "recaps" / "2026-03-08" / "meta.json").write_text('{"date":"2026-03-08"}')
 
         result = run_script("uninstall-local.sh", [], env=env)
         assert result.returncode == 0, f"Uninstall failed: {result.stderr}"
 
-        plugin_dir = hermes_home / "plugins" / "daily-ledger"
+        plugin_dir = hermes_home / "plugins" / "summarization-calendar"
         assert not plugin_dir.exists()
 
         # Ledger untouched
@@ -316,7 +316,7 @@ class TestUninstallBackupLayout:
         result = run_script("uninstall-local.sh", [], env=env)
         assert result.returncode == 0, f"Uninstall failed: {result.stderr}"
 
-        backup_root = hermes_home / "backups" / "daily-ledger-install"
+        backup_root = hermes_home / "backups" / "summarization-calendar-install"
         backups = [b for b in backup_root.iterdir() if "uninstall" in b.name]
         assert len(backups) >= 1, "No uninstall snapshot found"
 
@@ -335,7 +335,7 @@ class TestUninstallBackupLayout:
 
         session_meta = (
             hermes_home
-            / "daily-ledger"
+            / "summarization-calendar"
             / "session-versions"
             / "2026-07-12"
             / "identity"
@@ -344,7 +344,7 @@ class TestUninstallBackupLayout:
         )
         rollup_meta = (
             hermes_home
-            / "daily-ledger"
+            / "summarization-calendar"
             / "rollup-versions"
             / "2026-07-12"
             / "v1"
@@ -360,7 +360,7 @@ class TestUninstallBackupLayout:
         assert "Session versions preserved: 1" in removed.stdout
         assert "Roll-up versions preserved: 1" in removed.stdout
 
-        backup_root = hermes_home / "backups" / "daily-ledger-install"
+        backup_root = hermes_home / "backups" / "summarization-calendar-install"
         backups = list(backup_root.glob("uninstall-*/manifest.json"))
         assert len(backups) == 1
         manifest = json.loads(backups[0].read_text())
@@ -372,10 +372,10 @@ class TestStatusCurrentLayout:
 
     def test_status_counts_versions_and_only_live_jobs(self, tmp_path):
         hermes_home = tmp_path / "hermes"
-        plugin = hermes_home / "plugins" / "daily-ledger"
+        plugin = hermes_home / "plugins" / "summarization-calendar"
         plugin.mkdir(parents=True)
 
-        ledger = hermes_home / "daily-ledger"
+        ledger = hermes_home / "summarization-calendar"
         session_version = ledger / "session-versions" / "2026-07-12" / "identity" / "v1"
         rollup_version = ledger / "rollup-versions" / "2026-07-12" / "v1"
         session_version.mkdir(parents=True)

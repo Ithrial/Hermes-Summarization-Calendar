@@ -1,6 +1,10 @@
 """Atomic recap storage with immutable versioning.
 
-Default root is ``~/.hermes/daily-ledger`` (env override for tests).
+Default root is ``~/.hermes/summarization-calendar`` (env override for tests).
+Existing v1.1.0-and-earlier data under the legacy root
+``~/.hermes/daily-ledger`` is followed in place when the new root has no
+stored data yet (see :func:`get_ledger_root`), so pre-rename recaps remain
+readable and no split-brain between the two roots occurs.
 Each date has a current JSON+Markdown plus an immutable timestamped archive
 when replaced. Uses atomic temp+fsync+replace so partial writes never
 corrupt data. Restrictive user-only permissions (0o600/0o700).
@@ -28,7 +32,13 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 # Default ledger root — override via LEDGER_ROOT env in tests.
-DEFAULT_LEDGER_ROOT = Path.home() / ".hermes" / "daily-ledger"
+DEFAULT_LEDGER_ROOT = Path.home() / ".hermes" / "summarization-calendar"
+# Legacy root used by v1.1.0-and-earlier installs.
+LEGACY_LEDGER_ROOT = Path.home() / ".hermes" / "daily-ledger"
+
+# Subdirectories that hold stored data. A root containing only an empty
+# scaffold (created by _ensure_dirs) does NOT count as "having data".
+_DATA_SUBDIRS = ("recaps", "versions", "session-versions", "rollup-versions")
 
 
 @dataclass(frozen=True)
@@ -43,12 +53,40 @@ class RecapVersion:
     cron_count: int
 
 
+def _root_has_data(root: Path) -> bool:
+    """Return True if *root* contains at least one stored data artifact."""
+    for name in _DATA_SUBDIRS:
+        subdir = root / name
+        if subdir.is_dir():
+            try:
+                if any(subdir.iterdir()):
+                    return True
+            except OSError:
+                continue
+    return False
+
+
 def get_ledger_root() -> Path:
-    """Return the ledger root directory, respecting LEDGER_ROOT env."""
+    """Return the ledger root directory, respecting LEDGER_ROOT env.
+
+    Resolution order:
+    1. ``LEDGER_ROOT`` env (tests / explicit override) — always wins.
+    2. The new default root if it has stored data — a fresh install lands here.
+    3. The legacy root (``~/.hermes/daily-ledger``) if *it* has stored data —
+       an upgrade from v1.1.0-and-earlier keeps following the existing store
+       in place so pre-rename recaps stay readable and no split-brain
+       appears between the two roots. Data is never copied or moved.
+    4. Otherwise the new default root.
+    """
     env_val = os.environ.get("LEDGER_ROOT")
     if env_val:
         return Path(env_val).expanduser().resolve()
-    return DEFAULT_LEDGER_ROOT.resolve()
+    new_root = DEFAULT_LEDGER_ROOT
+    if _root_has_data(new_root):
+        return new_root.resolve()
+    if _root_has_data(LEGACY_LEDGER_ROOT):
+        return LEGACY_LEDGER_ROOT.resolve()
+    return new_root.resolve()
 
 
 # ---------------------------------------------------------------------------
@@ -560,7 +598,7 @@ def check_staleness(
 
 def _next_chicago_midnight(date_str: str) -> str:
     """Compute the next midnight UTC for a Chicago date."""
-    from hermes_daily_ledger.dates import chicago_next_midnight_utc
+    from hermes_summarization_calendar.dates import chicago_next_midnight_utc
 
     dt = chicago_next_midnight_utc(date_str)
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -568,10 +606,10 @@ def _next_chicago_midnight(date_str: str) -> str:
 
 def _render_markdown(data: dict[str, Any], meta: dict[str, Any]) -> str:
     """Render recap data as safe Markdown for storage and display."""
-    from hermes_daily_ledger.recap_validator import escape_markdown
+    from hermes_summarization_calendar.recap_validator import escape_markdown
 
     lines = [
-        f"# Daily Ledger Recap — {escape_markdown(meta.get('date', ''))}",
+        f"# Summarization Calendar Recap — {escape_markdown(meta.get('date', ''))}",
         "",
         f"**Generated:** {escape_markdown(meta.get('generated_at', ''))}  ",
         f"**Profile:** {escape_markdown(meta.get('profile', ''))}  ",

@@ -13,12 +13,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "dashboard"))
 
 import pytest
 
-from hermes_daily_ledger.contract import (
+from hermes_summarization_calendar.contract import (
     FingerprintComponent,
     _safe_job_name,
     compute_source_fingerprint,
 )
-from hermes_daily_ledger.inventory import (
+from hermes_summarization_calendar.inventory import (
     discover_all,
     discover_cron_roots,
     discover_profiles,
@@ -159,7 +159,7 @@ class TestDaySessionQuery:
         default_db = home / "state.db"
 
         # March 8 Chicago day window: 2026-03-08T06:00:00Z to 2026-03-09T05:00:00Z (23h)
-        from hermes_daily_ledger.dates import chicago_day_window_utc
+        from hermes_summarization_calendar.dates import chicago_day_window_utc
         start, end = chicago_day_window_utc("2026-03-08")
 
         sessions, _ = query_day_sessions(default_db, "default", start.timestamp(), end.timestamp())
@@ -169,8 +169,11 @@ class TestDaySessionQuery:
         assert "20260308_100000_bbb" in session_ids
         assert "20260308_tool_ff" in session_ids
 
-        # Plugin-internal session (source=daily-ledger) should be excluded
+        # Plugin-internal session (source=summarization-calendar) should be excluded
         assert "20260308_recap_dd" not in session_ids
+
+        # Legacy plugin-internal session (source=daily-ledger, pre-rename) excluded
+        assert "20260308_recap_legacy" not in session_ids
 
         # Inactive message session (active=0) should NOT appear
         assert "20260308_inactive_ee" not in session_ids
@@ -179,7 +182,7 @@ class TestDaySessionQuery:
         """Sessions with source='tool' must NOT be excluded."""
         home, _ = test_hermes_home
         default_db = home / "state.db"
-        from hermes_daily_ledger.dates import chicago_day_window_utc
+        from hermes_summarization_calendar.dates import chicago_day_window_utc
 
         start, end = chicago_day_window_utc("2026-03-08")
         sessions, _ = query_day_sessions(default_db, "default", start.timestamp(), end.timestamp())
@@ -189,7 +192,7 @@ class TestDaySessionQuery:
     def test_multi_profile_sessions(self, test_hermes_home):
         """Sessions from both default and named-profile profiles on March 8."""
         home, _ = test_hermes_home
-        from hermes_daily_ledger.dates import chicago_day_window_utc
+        from hermes_summarization_calendar.dates import chicago_day_window_utc
 
         start, end = chicago_day_window_utc("2026-03-08")
 
@@ -215,7 +218,7 @@ class TestCronQuery:
         home, _ = test_hermes_home
         _, cron_roots = discover_all(home)
 
-        from hermes_daily_ledger.dates import chicago_day_window_utc
+        from hermes_summarization_calendar.dates import chicago_day_window_utc
         start, end = chicago_day_window_utc("2026-03-08")
 
         runs, _ = query_day_cron_runs(cron_roots, start.timestamp(), end.timestamp())
@@ -226,7 +229,7 @@ class TestCronQuery:
         home, _ = test_hermes_home
         _, cron_roots = discover_all(home)
 
-        from hermes_daily_ledger.dates import chicago_day_window_utc
+        from hermes_summarization_calendar.dates import chicago_day_window_utc
         start, end = chicago_day_window_utc("2026-03-08")
 
         runs, _ = query_day_cron_runs(cron_roots, start.timestamp(), end.timestamp())
@@ -242,7 +245,7 @@ class TestCronQuery:
         home, _ = test_hermes_home
         _, cron_roots = discover_all(home)
 
-        from hermes_daily_ledger.dates import chicago_day_window_utc
+        from hermes_summarization_calendar.dates import chicago_day_window_utc
         start, end = chicago_day_window_utc("2026-03-08")
 
         runs, _ = query_day_cron_runs(cron_roots, start.timestamp(), end.timestamp())

@@ -11,9 +11,9 @@ import pytest
 from fastapi import HTTPException
 
 import plugin_api as api
-from hermes_daily_ledger import recap_storage as rs
-from hermes_daily_ledger.chunker import _split_content_utf8, chunk_transcripts
-from hermes_daily_ledger.transcript import TranscriptMessage
+from hermes_summarization_calendar import recap_storage as rs
+from hermes_summarization_calendar.chunker import _split_content_utf8, chunk_transcripts
+from hermes_summarization_calendar.transcript import TranscriptMessage
 
 REPO = Path(__file__).resolve().parent.parent
 INSTALL = REPO / "scripts" / "install-local.sh"
@@ -69,7 +69,7 @@ def test_version_collision_cannot_mutate_immutable_version(tmp_path):
 
 def test_invalid_install_mode_preserves_existing_plugin(tmp_path):
     home = tmp_path / ".hermes"
-    plugin = home / "plugins" / "daily-ledger"
+    plugin = home / "plugins" / "summarization-calendar"
     plugin.mkdir(parents=True)
     (plugin / "keep.txt").write_text("keep")
 
@@ -87,7 +87,7 @@ def test_invalid_install_mode_preserves_existing_plugin(tmp_path):
 
 def test_legacy_backup_with_only_subdirectories_restores(tmp_path):
     home = tmp_path / ".hermes"
-    backup = home / "backups" / "daily-ledger-install" / "legacy-dir-only"
+    backup = home / "backups" / "summarization-calendar-install" / "legacy-dir-only"
     (backup / "dashboard").mkdir(parents=True)
     (backup / "dashboard" / "index.js").write_text("ok")
     (backup / "manifest.json").write_text(
@@ -103,12 +103,12 @@ def test_legacy_backup_with_only_subdirectories_restores(tmp_path):
     )
 
     assert result.returncode == 0, result.stderr
-    assert (home / "plugins" / "daily-ledger" / "dashboard" / "index.js").read_text() == "ok"
+    assert (home / "plugins" / "summarization-calendar" / "dashboard" / "index.js").read_text() == "ok"
 
 
 def test_empty_new_layout_directory_restores_exact_type(tmp_path):
     home = tmp_path / ".hermes"
-    backup = home / "backups" / "daily-ledger-install" / "empty-dir"
+    backup = home / "backups" / "summarization-calendar-install" / "empty-dir"
     (backup / "payload").mkdir(parents=True)
     (backup / "manifest.json").write_text(
         json.dumps(
@@ -128,7 +128,7 @@ def test_empty_new_layout_directory_restores_exact_type(tmp_path):
         timeout=15,
     )
 
-    plugin = home / "plugins" / "daily-ledger"
+    plugin = home / "plugins" / "summarization-calendar"
     assert result.returncode == 0, result.stderr
     assert plugin.is_dir() and not plugin.is_symlink()
     assert list(plugin.iterdir()) == []
@@ -167,7 +167,7 @@ def test_many_oversized_segments_are_lossless_without_iteration_cap():
 
 def test_pending_workers_count_toward_global_limit(monkeypatch, tmp_path):
     import plugin_api as api
-    import hermes_daily_ledger.concurrency as concurrency
+    import hermes_summarization_calendar.concurrency as concurrency
 
     class PendingThread:
         def __init__(self, *args, **kwargs):
@@ -272,13 +272,13 @@ def test_legacy_cleanup_failure_does_not_misreport_successful_swap(tmp_path):
 
 def test_payload_directory_symlink_is_rejected_without_touching_current(tmp_path):
     home = tmp_path / ".hermes"
-    plugin = home / "plugins" / "daily-ledger"
+    plugin = home / "plugins" / "summarization-calendar"
     plugin.mkdir(parents=True)
     (plugin / "keep.txt").write_text("keep")
     external = tmp_path / "external"
     external.mkdir()
     (external / "foreign.txt").write_text("foreign")
-    backup = home / "backups" / "daily-ledger-install" / "symlink-payload"
+    backup = home / "backups" / "summarization-calendar-install" / "symlink-payload"
     backup.mkdir(parents=True)
     (backup / "payload").symlink_to(external, target_is_directory=True)
     (backup / "manifest.json").write_text(
@@ -300,8 +300,8 @@ def test_payload_directory_symlink_is_rejected_without_touching_current(tmp_path
 @pytest.mark.parametrize(
     ("script", "args", "old_glob"),
     [
-        (INSTALL, ["--copy"], ".daily-ledger-install-old-*"),
-        (ROLLBACK, ["restore-dir"], ".daily-ledger-restore-old-*"),
+        (INSTALL, ["--copy"], ".summarization-calendar-install-old-*"),
+        (ROLLBACK, ["restore-dir"], ".summarization-calendar-restore-old-*"),
     ],
 )
 def test_double_swap_failure_preserves_recoverable_previous_plugin(
@@ -309,11 +309,11 @@ def test_double_swap_failure_preserves_recoverable_previous_plugin(
 ):
     home = tmp_path / ".hermes"
     plugin_parent = home / "plugins"
-    plugin = plugin_parent / "daily-ledger"
+    plugin = plugin_parent / "summarization-calendar"
     plugin.mkdir(parents=True)
     (plugin / "keep.txt").write_text("keep")
     if script == ROLLBACK:
-        backup = home / "backups" / "daily-ledger-install" / "restore-dir"
+        backup = home / "backups" / "summarization-calendar-install" / "restore-dir"
         (backup / "payload").mkdir(parents=True)
         (backup / "payload" / "restored.txt").write_text("restored")
         (backup / "manifest.json").write_text(

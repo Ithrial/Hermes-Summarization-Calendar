@@ -11,7 +11,7 @@ from pathlib import Path
 # Ensure our dashboard module is on the path
 sys.path.insert(0, str(Path(__file__).parent.parent / "dashboard"))
 
-from hermes_daily_ledger.dates import (
+from hermes_summarization_calendar.dates import (
     CHICAGO,
     chicago_day_window_utc,
     chicago_midnight_utc,

@@ -1,7 +1,7 @@
-# Daily Ledger Plugin Implementation Plan
+# Summarization Calendar Plugin Implementation Plan
 **Date:** 2026-07-26
-**Plugin:** `hermes-daily-ledger` (standalone)
-**Workspace:** `/home/user/Hermes-Workspace/hermes-daily-ledger`
+**Plugin:** `hermes-summarization-calendar` (standalone)
+**Workspace:** `/home/user/Hermes-Workspace/hermes-summarization-calendar`
 
 ---
 
@@ -31,7 +31,7 @@ Implement a standalone Hermes Web Dashboard plugin that adds a **Calendar** page
 
 **WRITE-ONLY (LEDGER DATA) - plugin-owned:**
 ```text
-~/.hermes/daily-ledger/
+~/.hermes/summarization-calendar/
 ├── inventory/                          # Daily inventory snapshots
 │   └── YYYY-MM-DD/
 │       ├── sessions.json               # Session metadata for day (no messages)
@@ -114,9 +114,9 @@ CREATE TABLE executions (
 
 ---
 
-### 3. JSON Contract: `/api/plugins/daily-ledger/`
+### 3. JSON Contract: `/api/plugins/summarization-calendar/`
 
-All paths under `/api/plugins/daily-ledger/` require dashboard auth token.
+All paths under `/api/plugins/summarization-calendar/` require dashboard auth token.
 
 #### 3.1 GET `/month?year=2026&month=7`
 **Response:**
@@ -193,7 +193,7 @@ All paths under `/api/plugins/daily-ledger/` require dashboard auth token.
     "model": "response-model-id",
     "fingerprint": "sha256:1234abcd...",
     "source_fingerprint": "sha256:abcd1234...",
-    "previous_version_path": "/home/user/.hermes/daily-ledger/versions/2026-07-01/20260701T183000Z"
+    "previous_version_path": "/home/user/.hermes/summarization-calendar/versions/2026-07-01/20260701T183000Z"
   },
   "data": {
     "session_summaries": [
@@ -246,8 +246,8 @@ All paths under `/api/plugins/daily-ledger/` require dashboard auth token.
 ```json
 {
   "status": "restored",
-  "previous_version_path": "/home/user/.hermes/daily-ledger/versions/2026-07-01/20260701T183000Z",
-  "new_current_path": "/home/user/.hermes/daily-ledger/recaps/2026-07-01"
+  "previous_version_path": "/home/user/.hermes/summarization-calendar/versions/2026-07-01/20260701T183000Z",
+  "new_current_path": "/home/user/.hermes/summarization-calendar/recaps/2026-07-01"
 }
 ```
 
@@ -265,10 +265,10 @@ All paths under `/api/plugins/daily-ledger/` require dashboard auth token.
     "message": "Idle"
   },
   "storage": {
-    "inventory_dir": "/home/user/.hermes/daily-ledger/inventory",
-    "recaps_dir": "/home/user/.hermes/daily-ledger/recaps",
-    "versions_dir": "/home/user/.hermes/daily-ledger/versions",
-    "scans_dir": "/home/user/.hermes/daily-ledger/scans",
+    "inventory_dir": "/home/user/.hermes/summarization-calendar/inventory",
+    "recaps_dir": "/home/user/.hermes/summarization-calendar/recaps",
+    "versions_dir": "/home/user/.hermes/summarization-calendar/versions",
+    "scans_dir": "/home/user/.hermes/summarization-calendar/scans",
     "disk_usage_bytes": 1234567
   },
   "version": "1.0.0"
@@ -375,7 +375,7 @@ All summary generation uses Hermes' supported auxiliary task seam. The plugin su
 
 ```python
 from agent.auxiliary_client import call_llm
-from hermes_daily_ledger.limits import MAX_MODEL_PROMPT_BYTES
+from hermes_summarization_calendar.limits import MAX_MODEL_PROMPT_BYTES
 
 if len(prompt.encode("utf-8")) > MAX_MODEL_PROMPT_BYTES:
     raise ValueError("Summary prompt exceeds the fail-closed byte limit")
@@ -456,7 +456,7 @@ versions/
 **Concurrent request guard:**
 ```python
 # Use a lock file to prevent concurrent same-date requests
-lock_path = Path(f"~/.hermes/daily-ledger/.recap_lock_{date}.lock")
+lock_path = Path(f"~/.hermes/summarization-calendar/.recap_lock_{date}.lock")
 if lock_path.exists():
     raise HTTPException(status_code=409, detail="Recap generation in progress")
 ```
@@ -474,19 +474,19 @@ if lock_path.exists():
 #!/bin/bash
 set -e
 
-PLUGIN_DIR="$HOME/.hermes/plugins/daily-ledger"
-BACKUP_DIR="$HOME/.hermes/daily-ledger-backup"
-LEDGER_DIR="$HOME/.hermes/daily-ledger"
+PLUGIN_DIR="$HOME/.hermes/plugins/summarization-calendar"
+BACKUP_DIR="$HOME/.hermes/summarization-calendar-backup"
+LEDGER_DIR="$HOME/.hermes/summarization-calendar"
 MANIFEST_FILE="$BACKUP_DIR/install-manifest-$(date +%Y%m%d-%H%M%S).json"
 
-echo "=== Daily Ledger Plugin Install ==="
+echo "=== Summarization Calendar Plugin Install ==="
 
 # Backup pre-existing plugin (handles files, directories, symlinks)
 if [ -e "$PLUGIN_DIR" ] || [ -L "$PLUGIN_DIR" ]; then
     echo "Found pre-existing plugin, backing up to $BACKUP_DIR"
     mkdir -p "$BACKUP_DIR"
     ts=$(date +%Y%m%d-%H%M%S)
-    backup_path="$BACKUP_DIR/daily-ledger-$ts"
+    backup_path="$BACKUP_DIR/summarization-calendar-$ts"
     # -e handles files/dirs, -L handles symlinks
     if [ -L "$PLUGIN_DIR" ]; then
         # Symlink: copy target, preserve symlink name
@@ -522,10 +522,10 @@ echo "Backup manifest: $MANIFEST_FILE"
 #### 9.2 Status Check (`scripts/status.sh`)
 ```bash
 #!/bin/bash
-PLUGIN_DIR="$HOME/.hermes/plugins/daily-ledger"
-LEDGER_DIR="$HOME/.hermes/daily-ledger"
+PLUGIN_DIR="$HOME/.hermes/plugins/summarization-calendar"
+LEDGER_DIR="$HOME/.hermes/summarization-calendar"
 
-echo "=== Daily Ledger Status ==="
+echo "=== Summarization Calendar Status ==="
 echo "Plugin: $([ -L "$PLUGIN_DIR" ] && echo "symlink OK" || ([ -e "$PLUGIN_DIR" ] && echo "directory" || echo "MISSING"))"
 echo "Ledger directory: $([ -d "$LEDGER_DIR" ] && echo "OK" || echo "MISSING")"
 
@@ -545,26 +545,26 @@ fi
 #!/bin/bash
 set -e
 
-PLUGIN_DIR="$HOME/.hermes/plugins/daily-ledger"
-BACKUP_DIR="$HOME/.hermes/daily-ledger-backup"
-LEDGER_DIR="$HOME/.hermes/daily-ledger"
+PLUGIN_DIR="$HOME/.hermes/plugins/summarization-calendar"
+BACKUP_DIR="$HOME/.hermes/summarization-calendar-backup"
+LEDGER_DIR="$HOME/.hermes/summarization-calendar"
 
 if [ $# -lt 1 ]; then
     echo "Usage: $0 <backup_timestamp>"
     echo "Available backups:"
-    ls -1 "$BACKUP_DIR"/daily-ledger-* 2>/dev/null || echo "  (none)"
+    ls -1 "$BACKUP_DIR"/summarization-calendar-* 2>/dev/null || echo "  (none)"
     exit 1
 fi
 
 BACKUP_TIMESTAMP="$1"
-BACKUP_PATH="$BACKUP_DIR/daily-ledger-$BACKUP_TIMESTAMP"
+BACKUP_PATH="$BACKUP_DIR/summarization-calendar-$BACKUP_TIMESTAMP"
 
 if [ ! -e "$BACKUP_PATH" ] && [ ! -L "$BACKUP_PATH" ]; then
     echo "Error: Backup $BACKUP_TIMESTAMP not found"
     exit 1
 fi
 
-echo "=== Rolling back daily-ledger to $BACKUP_TIMESTAMP ==="
+echo "=== Rolling back summarization-calendar to $BACKUP_TIMESTAMP ==="
 
 # Remove current plugin
 if [ -L "$PLUGIN_DIR" ]; then
@@ -593,10 +593,10 @@ echo "Ledger data preserved at $LEDGER_DIR"
 #!/bin/bash
 set -e
 
-PLUGIN_DIR="$HOME/.hermes/plugins/daily-ledger"
-LEDGER_DIR="$HOME/.hermes/daily-ledger"
+PLUGIN_DIR="$HOME/.hermes/plugins/summarization-calendar"
+LEDGER_DIR="$HOME/.hermes/summarization-calendar"
 
-echo "=== Daily Ledger Uninstall ==="
+echo "=== Summarization Calendar Uninstall ==="
 
 # Remove plugin (files or symlink)
 if [ -L "$PLUGIN_DIR" ]; then
@@ -619,23 +619,23 @@ echo "Reinstall to restore functionality"
 ### 10. File Ownership & Implementation Tasks
 
 **Shared contract module (MUST be committed BEFORE parallel work):**
-- `hermes_daily_ledger/contract.py` — JSON schemas, data classes, API endpoint definitions
+- `hermes_summarization_calendar/contract.py` — JSON schemas, data classes, API endpoint definitions
 - Commit this first; workers branch from this commit
 
 #### 10.1 Backend Inventory/API (`backend_inventory.py`)
 **Responsibility:** State DB + cron executions scan → inventory JSON + API routes
 
 **Files:**
-- `hermes_daily_ledger/contract.py` (shared)
-- `hermes_daily_ledger/backend_inventory.py`
-- `hermes_daily_ledger/dates.py` (DST helpers)
-- `hermes_daily_ledger/schema.py` (SQLite schemas, read-only queries)
+- `hermes_summarization_calendar/contract.py` (shared)
+- `hermes_summarization_calendar/backend_inventory.py`
+- `hermes_summarization_calendar/dates.py` (DST helpers)
+- `hermes_summarization_calendar/schema.py` (SQLite schemas, read-only queries)
 
 **Endpoints:**
-- `GET /api/plugins/daily-ledger/month`
-- `GET /api/plugins/daily-ledger/day`
-- `GET /api/plugins/daily-ledger/health`
-- `POST /api/plugins/daily-ledger/inventory/refresh`
+- `GET /api/plugins/summarization-calendar/month`
+- `GET /api/plugins/summarization-calendar/day`
+- `GET /api/plugins/summarization-calendar/health`
+- `POST /api/plugins/summarization-calendar/inventory/refresh`
 
 **Dependencies:**
 - `sqlite3` (stdlib) for `state.db` + `executions.db` (READ ONLY, `mode=ro`)
@@ -680,7 +680,7 @@ const BASE = window.__HERMES_BASE_PATH__ || "";
 const SESSION_TOKEN = window.__HERMES_SESSION_TOKEN__;
 
 async function fetchPlugin<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}/api/plugins/daily-ledger${path}`, {
+  const res = await fetch(`${BASE}/api/plugins/summarization-calendar${path}`, {
     headers: { 'X-Hermes-Session-Token': SESSION_TOKEN },
   });
   if (!res.ok) throw new Error(`${res.status}: ${res.statusText}`);
@@ -700,14 +700,14 @@ export async function getMonth(year: number, month: number) {
 **Responsibility:** Auxiliary compression call, validation, atomic write, rollback
 
 **Files:**
-- `hermes_daily_ledger/contract.py` (shared)
-- `hermes_daily_ledger/recap_runner.py`
-- `hermes_daily_ledger/rollback.py` (versioning, backup)
+- `hermes_summarization_calendar/contract.py` (shared)
+- `hermes_summarization_calendar/recap_runner.py`
+- `hermes_summarization_calendar/rollback.py` (versioning, backup)
 
 **Endpoints:**
-- `POST /api/plugins/daily-ledger/recap` (queue generation)
-- `POST /api/plugins/daily-ledger/recap/rollback` (restore prior version)
-- `GET /api/plugins/daily-ledger/recap` (check status)
+- `POST /api/plugins/summarization-calendar/recap` (queue generation)
+- `POST /api/plugins/summarization-calendar/recap/rollback` (restore prior version)
+- `GET /api/plugins/summarization-calendar/recap` (check status)
 
 **Validation (before atomic write):**
 ```python
@@ -787,7 +787,7 @@ These are **ACCEPTANCE CRITERIA** — not yet verified:
 
 ## File Changes
 
-Only `docs/plans/2026-07-26-daily-ledger-implementation.md` modified.
+Only `docs/plans/2026-07-26-summarization-calendar-implementation.md` modified.
 
 **Commit message:**
 ```
@@ -798,7 +798,7 @@ docs: correct daily ledger plan against live schemas
 
 ## Final Deliverable
 
-**Plan file:** `/home/user/Hermes-Workspace/hermes-daily-ledger/docs/plans/2026-07-26-daily-ledger-implementation.md`
+**Plan file:** `/home/user/Hermes-Workspace/hermes-summarization-calendar/docs/plans/2026-07-26-summarization-calendar-implementation.md`
 
 ---
 

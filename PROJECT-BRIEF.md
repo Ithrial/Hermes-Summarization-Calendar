@@ -1,4 +1,4 @@
-# Hermes Daily Ledger — Project Brief
+# Hermes Summarization Calendar — Project Brief
 
 ## Goal
 
@@ -39,10 +39,10 @@ The page automatically inventories Hermes activity by day and allows users to ma
 ## Safety and rollback
 
 - Develop in this standalone repository, not in the Hermes Agent core checkout.
-- Install under `~/.hermes/plugins/daily-ledger` via a symlink or atomic copy.
-- Persist ledger data under `~/.hermes/daily-ledger`, never under the plugin installation directory.
+- Install under `~/.hermes/plugins/summarization-calendar` via a symlink or atomic copy.
+- Persist ledger data under `~/.hermes/summarization-calendar`, never under the plugin installation directory.
 - Include scripts or documented commands for install, status, uninstall/rollback, and reinstall.
-- Installation must back up any pre-existing `daily-ledger` plugin before replacement.
+- Installation must back up any pre-existing `summarization-calendar` plugin before replacement.
 - Rollback must remove/restore plugin code without deleting ledger data.
 - Plugin API inputs must validate dates, paths, limits, and profile names. SQL must be parameterized.
 - Treat session text as untrusted data when prompting the summary model and when rendering HTML.

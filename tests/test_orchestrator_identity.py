@@ -2,15 +2,15 @@
 from __future__ import annotations
 from types import SimpleNamespace
 
-from hermes_daily_ledger.auxiliary_runner import AuxiliaryResult
-from hermes_daily_ledger.contract import DailySession
-from hermes_daily_ledger.recap_orchestrator import (
+from hermes_summarization_calendar.auxiliary_runner import AuxiliaryResult
+from hermes_summarization_calendar.contract import DailySession
+from hermes_summarization_calendar.recap_orchestrator import (
     _merge_chunk_session_summaries,
     _reconcile_inventory_transcripts,
     _validate_chunk_result,
 )
-from hermes_daily_ledger.recap_validator import SessionIdentity
-from hermes_daily_ledger.transcript import SessionTranscript, TranscriptMessage
+from hermes_summarization_calendar.recap_validator import SessionIdentity
+from hermes_summarization_calendar.transcript import SessionTranscript, TranscriptMessage
 
 
 def _daily(session_id: str, title: str) -> DailySession:

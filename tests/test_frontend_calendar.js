@@ -215,7 +215,7 @@ describe('Source code security scan', () => {
       'Registration must be wrapped in try/catch');
   });
   it('logs one clear error on SDK missing', () => {
-    assert.ok(SOURCE.includes("console.error('[daily-ledger]"),
+    assert.ok(SOURCE.includes("console.error('[summarization-calendar]"),
       'Must log a clear error when SDK is unavailable');
   });
 });
@@ -226,7 +226,7 @@ describe('IIFE registration pattern', () => {
     assert.ok(SOURCE.includes('window.__HERMES_PLUGINS__'));
   });
   it('calls window.__HERMES_PLUGINS__.register with correct name', () => {
-    assert.ok(SOURCE.includes("window.__HERMES_PLUGINS__.register('daily-ledger'"));
+    assert.ok(SOURCE.includes("window.__HERMES_PLUGINS__.register('summarization-calendar'"));
   });
   it('returns early when SDK unavailable (no crash)', () => {
     var returnIdx = SOURCE.indexOf('return;');
@@ -241,13 +241,13 @@ describe('Manifest validation', () => {
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
 
   it('has required name field', () => {
-    assert.strictEqual(manifest.name, 'daily-ledger');
+    assert.strictEqual(manifest.name, 'summarization-calendar');
   });
   it('has label Calendar', () => {
     assert.strictEqual(manifest.label, 'Calendar');
   });
   it('has correct version', () => {
-    assert.strictEqual(manifest.version, '1.1.0');
+    assert.strictEqual(manifest.version, '1.2.0');
   });
   it('has tab path /calendar', () => {
     assert.strictEqual(manifest.tab.path, '/calendar');

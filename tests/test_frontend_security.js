@@ -38,7 +38,7 @@ describe('Source security bans', () => {
 
 describe('Registration failure handling', () => {
   it('logs console.error on missing SDK', () => {
-    assert.ok(SOURCE.includes("console.error('[daily-ledger]"),
+    assert.ok(SOURCE.includes("console.error('[summarization-calendar]"),
       'Must log console.error when SDK is unavailable');
   });
   it('returns early without calling register when SDK missing', () => {

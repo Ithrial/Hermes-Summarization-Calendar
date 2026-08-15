@@ -1,6 +1,6 @@
-"""Hermes Daily Ledger -- dashboard plugin API routes.
+"""Hermes Summarization Calendar -- dashboard plugin API routes.
 
-Mounted at ``/api/plugins/daily-ledger/`` by the Hermes dashboard plugin
+Mounted at ``/api/plugins/summarization-calendar/`` by the Hermes dashboard plugin
 loader.  Requires existing dashboard auth (handled by the middleware that
 wraps all ``/api/plugins/...`` routes); no duplicate auth here.
 
@@ -35,7 +35,7 @@ from pydantic import BaseModel, Field
 # Hermes loads this file directly with ``spec_from_file_location`` and does not
 # add dashboard/ to sys.path.  Load the sibling package explicitly rather than
 # mutating the process-wide import path (which could shadow unrelated modules).
-_PACKAGE_NAME = "hermes_daily_ledger"
+_PACKAGE_NAME = "hermes_summarization_calendar"
 _PACKAGE_INIT = Path(__file__).resolve().parent / _PACKAGE_NAME / "__init__.py"
 _existing_package = sys.modules.get(_PACKAGE_NAME)
 if _existing_package is None:
@@ -61,8 +61,8 @@ else:
             f"loaded from {_existing_file}, expected {_PACKAGE_INIT.resolve()}"
         )
 
-from hermes_daily_ledger import __version__
-from hermes_daily_ledger.contract import (
+from hermes_summarization_calendar import __version__
+from hermes_summarization_calendar.contract import (
     DailySession,
     DayCell,
     MonthInventory,
@@ -71,7 +71,7 @@ from hermes_daily_ledger.contract import (
     health_to_dict,
     month_to_dict,
 )
-from hermes_daily_ledger.inventory import (
+from hermes_summarization_calendar.inventory import (
     build_day_inventory,
     build_month_inventory,
     check_health,
@@ -80,26 +80,26 @@ from hermes_daily_ledger.inventory import (
 
 # Recap modules -- always imported; ImportError raises at load time which is
 # fine since this plugin requires them.
-from hermes_daily_ledger.concurrency import (  # noqa: F401
+from hermes_summarization_calendar.concurrency import (  # noqa: F401
     acquire_generation_slot,
     load_status as _load_job_status,
     recover_stale_locks,
 )
-from hermes_daily_ledger.recap_orchestrator import check_recap_status, generate_recap
-from hermes_daily_ledger.recap_storage import (  # noqa: F401
+from hermes_summarization_calendar.recap_orchestrator import check_recap_status, generate_recap
+from hermes_summarization_calendar.recap_storage import (  # noqa: F401
     get_ledger_root,
     list_versions as _list_versions,
     recap_exists,
     rollback_to_version,
     validate_version_id,
 )
-from hermes_daily_ledger.rollup_orchestrator import (
+from hermes_summarization_calendar.rollup_orchestrator import (
     build_rollup_inputs,
     check_rollup_status,
     generate_rollup,
 )
-from hermes_daily_ledger.session_orchestrator import generate_session_summary
-from hermes_daily_ledger.session_storage import (
+from hermes_summarization_calendar.session_orchestrator import generate_session_summary
+from hermes_summarization_calendar.session_storage import (
     artifact_key,
     check_session_staleness,
     list_rollup_versions,
@@ -110,7 +110,7 @@ from hermes_daily_ledger.session_storage import (
     rollback_session_summary,
     session_summary_exists,
 )
-from hermes_daily_ledger.summary_jobs import (
+from hermes_summarization_calendar.summary_jobs import (
     acquire_rollup_job,
     acquire_session_job,
     fail_rollup_job,
@@ -119,16 +119,16 @@ from hermes_daily_ledger.summary_jobs import (
     load_session_job,
     recover_stale_jobs,
 )
-from hermes_daily_ledger.batch_jobs import (
+from hermes_summarization_calendar.batch_jobs import (
     create_batch_job,
     load_batch_job,
     list_batch_jobs,
     recover_stale_batch_jobs,
 )
-from hermes_daily_ledger.batch_orchestrator import run_batch_summary
+from hermes_summarization_calendar.batch_orchestrator import run_batch_summary
 
 # Keep module reference for helper calls
-import hermes_daily_ledger.batch_jobs as batch_jobs
+import hermes_summarization_calendar.batch_jobs as batch_jobs
 
 logger = logging.getLogger(__name__)
 
@@ -354,7 +354,7 @@ def health() -> dict[str, Any]:
     status = "ok" if readable > 0 else "degraded"
     health_obj = HealthStatus(
         status=status,
-        plugin_name="daily-ledger",
+        plugin_name="summarization-calendar",
         version=__version__,
         profiles_discovered=len(profiles),
         readable_sources=readable,
@@ -406,7 +406,7 @@ def month(
         elif has_legacy_recap:
             try:
                 day_inv = build_day_inventory(cell.date, profiles, cron_roots)
-                from hermes_daily_ledger.recap_storage import check_staleness
+                from hermes_summarization_calendar.recap_storage import check_staleness
                 stale = check_staleness(
                     cell.date, day_inv.source_fingerprint, ledger_root
                 )
@@ -575,7 +575,7 @@ def post_recap(
         active_count = len(_worker_pool)
         if active_count >= _MAX_CONCURRENCY:
             # Release the per-date slot we just acquired — worker will never run
-            from hermes_daily_ledger.concurrency import release_generation_slot
+            from hermes_summarization_calendar.concurrency import release_generation_slot
             try:
                 release_generation_slot(date_str)
             except Exception:
@@ -596,7 +596,7 @@ def post_recap(
         with _worker_lock:
             if _worker_pool.get(date_str) is worker:
                 _worker_pool.pop(date_str, None)
-        from hermes_daily_ledger.concurrency import release_generation_slot
+        from hermes_summarization_calendar.concurrency import release_generation_slot
         try:
             release_generation_slot(date_str)
         except Exception:

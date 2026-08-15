@@ -16,16 +16,16 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / "dashboard"))
 
 # Import after path setup
-from hermes_daily_ledger.auxiliary_runner import (
+from hermes_summarization_calendar.auxiliary_runner import (
     AuxiliaryResult,
     run_auxiliary_compression,
     _parse_compression_output,
 )
-from hermes_daily_ledger.inventory import discover_all
-from hermes_daily_ledger.session_orchestrator import generate_session_summary
-from hermes_daily_ledger.session_storage import save_session_summary
-from hermes_daily_ledger.summary_jobs import _reset_for_tests
-from hermes_daily_ledger.limits import MAX_MODEL_PROMPT_BYTES
+from hermes_summarization_calendar.inventory import discover_all
+from hermes_summarization_calendar.session_orchestrator import generate_session_summary
+from hermes_summarization_calendar.session_storage import save_session_summary
+from hermes_summarization_calendar.summary_jobs import _reset_for_tests
+from hermes_summarization_calendar.limits import MAX_MODEL_PROMPT_BYTES
 
 DATE = "2026-03-08"
 PROFILE = "default"
@@ -552,27 +552,27 @@ class TestSharedLimitInvariant:
 
     def test_runner_chunker_recap_rollup_all_use_same_limit(self):
         """One shared-limit invariant covers runner, chunker default, recap default, and roll-up guard."""
-        from hermes_daily_ledger.limits import MAX_MODEL_PROMPT_BYTES
+        from hermes_summarization_calendar.limits import MAX_MODEL_PROMPT_BYTES
 
         # Verify chunker's DEFAULT_SAFE_CEILING equals the shared constant
-        from hermes_daily_ledger import chunker
+        from hermes_summarization_calendar import chunker
         assert chunker.DEFAULT_SAFE_CEILING == MAX_MODEL_PROMPT_BYTES
 
         # Verify summary orchestrator's safe_ceiling default
         import inspect
-        from hermes_daily_ledger.recap_orchestrator import generate_recap
+        from hermes_summarization_calendar.recap_orchestrator import generate_recap
         assert inspect.signature(generate_recap).parameters["safe_ceiling"].default == MAX_MODEL_PROMPT_BYTES
 
         # Verify roll-up orchestrator's max prompt bytes (module-level constant)
-        from hermes_daily_ledger import rollup_orchestrator
+        from hermes_summarization_calendar import rollup_orchestrator
         assert rollup_orchestrator._MAX_ROLLUP_PROMPT_BYTES == MAX_MODEL_PROMPT_BYTES
 
         # Verify runner module uses the shared constant
-        from hermes_daily_ledger import auxiliary_runner
+        from hermes_summarization_calendar import auxiliary_runner
         assert auxiliary_runner.MAX_MODEL_PROMPT_BYTES == MAX_MODEL_PROMPT_BYTES
 
         # Verify limits.py exports ONLY MAX_MODEL_PROMPT_BYTES (no DEFAULT_SAFE_CEILING)
-        import hermes_daily_ledger.limits as limits_module
+        import hermes_summarization_calendar.limits as limits_module
         exported = [name for name in dir(limits_module) if not name.startswith("_")]
         assert "MAX_MODEL_PROMPT_BYTES" in exported
         assert "DEFAULT_SAFE_CEILING" not in exported
@@ -605,7 +605,7 @@ class TestGenerateSessionSummaryWithAuxiliary:
             }
             content = _wrap_with_markers(data)
             response = _create_chat_response(content, model="test")
-            from hermes_daily_ledger.auxiliary_runner import _parse_compression_output
+            from hermes_summarization_calendar.auxiliary_runner import _parse_compression_output
             return _parse_compression_output(content, response.model)
 
         status = generate_session_summary(
@@ -642,7 +642,7 @@ class TestGenerateSessionSummaryWithAuxiliary:
         assert status.status == "failed"
         assert "Model unavailable" in status.error
         # No summary should be published
-        from hermes_daily_ledger.session_storage import load_session_summary
+        from hermes_summarization_calendar.session_storage import load_session_summary
         raw, meta = load_session_summary(DATE, PROFILE, SESSION_ID, tmp_path / "ledger")
         assert raw is None
         assert meta is None
@@ -653,7 +653,7 @@ class TestAuxiliaryMetadata:
 
     def test_session_summary_records_auxiliary_route(self, test_hermes_home, tmp_path: Path):
         """Verify session summary metadata identifies auxiliary.compression route."""
-        from hermes_daily_ledger.session_storage import save_session_summary, load_session_summary
+        from hermes_summarization_calendar.session_storage import save_session_summary, load_session_summary
 
         version = save_session_summary(
             DATE,

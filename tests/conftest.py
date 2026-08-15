@@ -1,4 +1,4 @@
-"""Shared pytest fixtures for Daily Ledger tests.
+"""Shared pytest fixtures for Summarization Calendar tests.
 
 Creates in-memory SQLite databases with representative schemas matching
 the live Hermes state.db and cron/executions.db layouts.
@@ -179,18 +179,33 @@ def _insert_test_data(conn: sqlite3.Connection) -> None:
         (s3_id, "still debugging", 1773021600.0),  # Mar 9 02:00 UTC -> within Mar 8 window [06Z Mar8, 05Z Mar9)
     )
 
-    # Session 4: Plugin-internal session (source='daily-ledger') — EXCLUDED
+    # Session 4: Plugin-internal session (source='summarization-calendar') — EXCLUDED
     s4_id = "20260308_recap_dd"
     conn.execute(
         """INSERT INTO sessions (id, source, model, title, started_at, ended_at,
            profile_name, message_count, tool_call_count)
-           VALUES (?, 'daily-ledger', 'fixture-provider/fixture-model', 'Daily recap generation',
+           VALUES (?, 'summarization-calendar', 'fixture-provider/fixture-model', 'Daily recap generation',
            ?, ?, 'default', 0, 0)""",
         (s4_id, 1772960400.0, 1772970000.0),
     )
     conn.execute(
         "INSERT INTO messages (session_id, role, content, timestamp, active) VALUES (?, 'user', ?, ?, 1)",
         (s4_id, "generate recap", 1772964000.0),
+    )
+
+    # Session 4b: Legacy plugin-internal session (source='daily-ledger', the
+    # v1.1.0-and-earlier tag) — must ALSO be excluded after the v1.2.0 rename.
+    s4b_id = "20260308_recap_legacy"
+    conn.execute(
+        """INSERT INTO sessions (id, source, model, title, started_at, ended_at,
+           profile_name, message_count, tool_call_count)
+           VALUES (?, 'daily-ledger', 'fixture-provider/fixture-model', 'Legacy recap generation',
+           ?, ?, 'default', 0, 0)""",
+        (s4b_id, 1772960400.0, 1772970000.0),
+    )
+    conn.execute(
+        "INSERT INTO messages (session_id, role, content, timestamp, active) VALUES (?, 'user', ?, ?, 1)",
+        (s4b_id, "generate legacy recap", 1772964200.0),
     )
 
     # Session 5: Inactive message (active=0) — should NOT count

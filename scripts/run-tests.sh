@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run the complete Daily Ledger release gate without external model calls.
+# Run the complete Summarization Calendar release gate without external model calls.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -22,7 +22,7 @@ command -v node >/dev/null 2>&1 || {
     exit 1
 }
 
-GUARD_LOG="$(mktemp -t daily-ledger-network-guard.XXXXXX.log)"
+GUARD_LOG="$(mktemp -t summarization-calendar-network-guard.XXXXXX.log)"
 trap 'rm -f -- "$GUARD_LOG"' EXIT
 export PYTEST_NETWORK_GUARD_LOG="$GUARD_LOG"
 export PYTHONPATH="$ROOT/dashboard:$ROOT/scripts${PYTHONPATH:+:$PYTHONPATH}"
@@ -55,4 +55,4 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     git diff --check
 fi
 
-echo "Daily Ledger release gate passed"
+echo "Summarization Calendar release gate passed"

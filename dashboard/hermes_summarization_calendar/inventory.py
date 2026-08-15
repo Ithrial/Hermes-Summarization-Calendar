@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from hermes_daily_ledger.contract import (
+from hermes_summarization_calendar.contract import (
     DailyCronRun,
     DailySession,
     DayCell,
@@ -27,16 +27,22 @@ from hermes_daily_ledger.contract import (
     _safe_job_name,
     compute_source_fingerprint,
 )
-from hermes_daily_ledger.dates import (
+from hermes_summarization_calendar.dates import (
     chicago_day_window_utc,
     days_in_month,
     date_str_from_ymd,
     unix_ts_to_utc_iso,
 )
 
-# Sessions with this exact ``source`` value belong to the plugin itself and
-# must be excluded so recap generation does not include its own output.
-_PLUGIN_SOURCE = "daily-ledger"
+# Sessions with one of these ``source`` values belong to the plugin itself
+# and must be excluded so recap generation does not include its own output.
+# "summarization-calendar" is the current tag; "daily-ledger" is the legacy
+# tag written by v1.1.0-and-earlier installs (Hermes core tags the
+# auxiliary-compression sub-session the plugin uses). Both must be excluded
+# so a renamed install never indexes its own pre-rename recap sessions.
+_PLUGIN_SOURCE = "summarization-calendar"
+_LEGACY_PLUGIN_SOURCE = "daily-ledger"
+_PLUGIN_SOURCES = (_PLUGIN_SOURCE, _LEGACY_PLUGIN_SOURCE)
 
 
 # ---------------------------------------------------------------------------
@@ -200,7 +206,7 @@ def open_readonly(path: Path) -> sqlite3.Connection:
 
 def _is_source_excluded(source: str | None) -> bool:
     """Return True for plugin-internal sessions that must be excluded."""
-    return source == _PLUGIN_SOURCE
+    return source in _PLUGIN_SOURCES
 
 
 def _safe_title(raw_title: str | None, session_id: str) -> str:
@@ -257,10 +263,12 @@ def query_day_sessions(
             WHERE m.active = 1
               AND m.timestamp >= ?
               AND m.timestamp < ?
-              AND (s.source != ? OR s.source IS NULL)
+              AND (s.source NOT IN (?, ?) OR s.source IS NULL)
             ORDER BY s.id
         """
-        rows = conn.execute(query, (start_utc, end_utc, _PLUGIN_SOURCE)).fetchall()
+        rows = conn.execute(
+            query, (start_utc, end_utc, *_PLUGIN_SOURCES)
+        ).fetchall()
 
         sessions: list[DailySession] = []
         components: list[FingerprintComponent] = []

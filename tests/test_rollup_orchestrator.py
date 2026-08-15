@@ -11,18 +11,18 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "dashboard"))
 
-from hermes_daily_ledger.auxiliary_runner import AuxiliaryResult
-from hermes_daily_ledger.inventory import build_day_inventory, discover_all
-from hermes_daily_ledger.rollup_orchestrator import (
+from hermes_summarization_calendar.auxiliary_runner import AuxiliaryResult
+from hermes_summarization_calendar.inventory import build_day_inventory, discover_all
+from hermes_summarization_calendar.rollup_orchestrator import (
     build_rollup_inputs,
     check_rollup_status,
     generate_rollup,
 )
-from hermes_daily_ledger.session_storage import (
+from hermes_summarization_calendar.session_storage import (
     load_rollup,
     save_session_summary,
 )
-from hermes_daily_ledger.summary_jobs import _reset_for_tests
+from hermes_summarization_calendar.summary_jobs import _reset_for_tests
 
 DATE = "2026-03-08"
 
