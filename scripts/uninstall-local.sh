@@ -107,6 +107,19 @@ fi
 # pre-rename root (whichever holds data — see recap_storage.get_ledger_root).
 # --remove-data is explicit and destructive: it removes BOTH roots so a
 # --remove-data uninstall never leaves a stranded pre-rename store behind.
+
+# Mirrors _root_has_data() in recap_storage: a root counts as holding data
+# only if one of its data subdirectories is non-empty (empty scaffolds don't).
+_store_has_data() {
+    local root="$1" d
+    for d in recaps versions session-versions rollup-versions; do
+        if [ -d "$root/$d" ] && [ -n "$(ls -A "$root/$d" 2>/dev/null | head -1)" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 case "$REMOVE_DATA" in
     --remove-data|-r)
         if [ -d "$LEDGER_DIR" ]; then
@@ -119,11 +132,22 @@ case "$REMOVE_DATA" in
         fi
         ;;
     *)
-        # Report on whichever store actually holds data (new first).
-        if [ -d "$LEDGER_DIR" ]; then
-            echo ""
-            echo "Ledger data PRESERVED at: $LEDGER_DIR"
-            python3 - "$LEDGER_DIR" "$LEGACY_LEDGER_DIR" <<'PY'
+        # Report the store that actually holds data (mirrors
+        # recap_storage.get_ledger_root: new root first, then legacy), so the
+        # operator is told where their recaps really live.
+        if _store_has_data "$LEDGER_DIR"; then
+            REPORT_STORE="$LEDGER_DIR"
+            REPORT_NOTE=""
+        elif _store_has_data "$LEGACY_LEDGER_DIR"; then
+            REPORT_STORE="$LEGACY_LEDGER_DIR"
+            REPORT_NOTE=" (pre-rename store, kept in place)"
+        else
+            REPORT_STORE="$LEDGER_DIR"
+            REPORT_NOTE=""
+        fi
+        echo ""
+        echo "Ledger data PRESERVED at: $REPORT_STORE$REPORT_NOTE"
+        python3 - "$LEDGER_DIR" "$LEGACY_LEDGER_DIR" <<'PY'
 import sys
 from pathlib import Path
 
@@ -138,10 +162,6 @@ rollup = count_meta(new_root, "rollup-versions") + count_meta(legacy_root, "roll
 print(f"  Session versions preserved: {session}")
 print(f"  Roll-up versions preserved: {rollup}")
 PY
-        elif [ -d "$LEGACY_LEDGER_DIR" ]; then
-            echo ""
-            echo "Ledger data PRESERVED at: $LEGACY_LEDGER_DIR (pre-rename store)"
-        fi
         ;;
 esac
 
