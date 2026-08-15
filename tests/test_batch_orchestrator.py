@@ -781,7 +781,7 @@ class TestBatchOrchestrator:
         _create_batch(root, date, bid, members)
 
         def generate_summary(d, profile, sid, *, slot_reserved=False, **kw):
-            raise ValueError("Traceback: leaked /home/sean/.hermes/state.db content=SECRET")
+            raise ValueError("Traceback: leaked /home/alice/.hermes/state.db content=SECRET")
 
         run_batch_summary(
             date, bid, ledger_root=root,
@@ -797,7 +797,7 @@ class TestBatchOrchestrator:
         member = loaded["members"][0]
         err = (member["error"] or "").lower()
         assert "secret" not in err
-        assert "/home/sean" not in err
+        assert "/home/alice" not in err
         assert "traceback" not in err
 
     # =========================================================================
@@ -981,7 +981,7 @@ class TestBatchOrchestrator:
         from hermes_daily_ledger.batch_orchestrator import _sanitize_error
 
         # Path leak
-        assert _sanitize_error("error at /home/sean/data") == "Session summary generation failed"
+        assert _sanitize_error("error at /home/alice/data") == "Session summary generation failed"
         assert _sanitize_error("/root/.ssh/key") == "Session summary generation failed"
         assert _sanitize_error("/var/log/crash.log") == "Session summary generation failed"
         assert _sanitize_error("/etc/shadow exposed") == "Session summary generation failed"
