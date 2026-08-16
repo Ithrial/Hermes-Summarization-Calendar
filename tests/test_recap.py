@@ -1134,22 +1134,21 @@ class TestRecapEndpoints:
         data = resp.json()
         assert data["exists"] is False
 
-    def test_post_recap_no_activity(self, empty_hermes_home, tmp_path):
-        """POST /recap on a day with no sessions should queue (202) then fail in background."""
-        import hermes_summarization_calendar.concurrency as conc_mod
-        with conc_mod._lock_registry_lock:
-            conc_mod._locks.clear()
-
+    def test_post_recap_no_activity_returns_410(self, empty_hermes_home, tmp_path):
+        """v1.2.4: legacy raw recap generation is retired — POST /recap is 410."""
         ledger = tmp_path / "ledger"
         client = self._app(empty_hermes_home, ledger)
 
         resp = client.post("/api/plugins/summarization-calendar/recap?date=2026-03-08")
-        assert resp.status_code == 202
-        data = resp.json()
-        assert data["status"] == "queued"
+        assert resp.status_code == 410
+        detail = resp.json()["detail"]
+        assert detail["error"] == "recap_generation_retired"
+        # Points clients at the supported generation paths.
+        assert "session-summary/batch" in detail["message"]
+        assert "rollup" in detail["message"]
 
-    def test_post_recap_concurrent_rejected(self, test_hermes_home, tmp_path):
-        """Concurrent POST /recap for same date should return 409."""
+    def test_post_recap_generation_retired_no_side_effects(self, test_hermes_home, tmp_path):
+        """Retired POST /recap must not acquire slots, spawn workers, or queue jobs."""
         import hermes_summarization_calendar.concurrency as conc_mod
         with conc_mod._lock_registry_lock:
             conc_mod._locks.clear()
@@ -1158,11 +1157,21 @@ class TestRecapEndpoints:
         client = self._app(test_hermes_home[0], ledger)
 
         resp1 = client.post("/api/plugins/summarization-calendar/recap?date=2026-03-08")
-        assert resp1.status_code == 202, f"Expected 202, got {resp1.status_code}"
+        assert resp1.status_code == 410, f"Expected 410, got {resp1.status_code}"
 
-        # Second request should be rejected (slot still held)
-        resp2 = client.post("/api/plugins/summarization-calendar/recap?date=2026-03-08")
-        assert resp2.status_code == 409, f"Expected 409, got {resp2.status_code}"
+        # Repeated requests stay 410 — no concurrent state can accumulate.
+        resp2 = client.post(
+            "/api/plugins/summarization-calendar/recap?date=2026-03-08",
+            json={"force_regenerate": True},
+        )
+        assert resp2.status_code == 410
+
+        # No generation slot was acquired and no worker was spawned.
+        import plugin_api
+        with conc_mod._lock_registry_lock:
+            assert "2026-03-08" not in conc_mod._locks
+        with plugin_api._worker_lock:
+            assert "2026-03-08" not in plugin_api._worker_pool
 
     def test_get_recap_invalid_date(self, empty_hermes_home, tmp_path):
         ledger = tmp_path / "ledger"
@@ -1211,13 +1220,13 @@ class TestRecapEndpoints:
             assert "has_recap" in cell
             assert "recap_stale" in cell
 
-    def test_post_recap_already_exists(self, test_hermes_home, tmp_path):
-        """POST /recap should reject if recap already exists (without force)."""
+    def test_post_recap_retired_even_when_recap_exists(self, test_hermes_home, tmp_path):
+        """Retired POST /recap must not regenerate or overwrite an existing recap."""
         ledger = tmp_path / "ledger"
         client = self._app(test_hermes_home[0], ledger)
 
         # First create a recap via storage directly
-        from hermes_summarization_calendar.recap_storage import save_recap
+        from hermes_summarization_calendar.recap_storage import load_recap, save_recap
         save_recap(
             "2026-03-08",
             {"session_summaries": [{"session_id": "s1", "title": "T", "summary": "S"}],
@@ -1225,11 +1234,18 @@ class TestRecapEndpoints:
             "fp1",
             ledger_root=ledger,
         )
+        before = load_recap("2026-03-08", ledger_root=ledger)
 
-        resp = client.post("/api/plugins/summarization-calendar/recap?date=2026-03-08")
-        assert resp.status_code == 400
-        data = resp.json()
-        assert "recap_already_exists" in str(data)
+        resp = client.post(
+            "/api/plugins/summarization-calendar/recap?date=2026-03-08",
+            json={"force_regenerate": True},
+        )
+        assert resp.status_code == 410
+        assert "recap_generation_retired" in str(resp.json())
+
+        # The stored recap is untouched — read access is the surviving surface.
+        after = load_recap("2026-03-08", ledger_root=ledger)
+        assert after == before
 
 
 # ====================================================================

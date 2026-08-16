@@ -166,8 +166,16 @@ def test_many_oversized_segments_are_lossless_without_iteration_cap():
 
 
 def test_pending_workers_count_toward_global_limit(monkeypatch, tmp_path):
-    import plugin_api as api
+    """v1.2.4: capacity regression moved to the batch route.
+
+    Legacy raw recap generation was retired, so pending (not-yet-started)
+    batch coordinators are the workers that must count toward the global
+    limit. Each batch request creates one durable job and reserves one
+    pending coordinator thread before the next request can be served.
+    """
     import hermes_summarization_calendar.concurrency as concurrency
+    from hermes_summarization_calendar.contract import DailySession
+    from types import SimpleNamespace
 
     class PendingThread:
         def __init__(self, *args, **kwargs):
@@ -177,19 +185,39 @@ def test_pending_workers_count_toward_global_limit(monkeypatch, tmp_path):
         def is_alive(self):
             return False
 
+    def _member(n):
+        return DailySession(
+            session_id=f"2026070{n}_100000_bbb",
+            profile="default",
+            source="cli",
+            model="model",
+            title=f"Session {n}",
+            message_count=1,
+            tool_call_count=0,
+        )
+
     api._worker_pool.clear()
     monkeypatch.setattr(api, "_ensure_startup", lambda: None)
     monkeypatch.setattr(api, "get_ledger_root", lambda: tmp_path)
-    monkeypatch.setattr(api, "recap_exists", lambda *args, **kwargs: False)
-    monkeypatch.setattr(api, "acquire_generation_slot", lambda *args, **kwargs: True)
+    monkeypatch.setattr(
+        api,
+        "_build_day_inventory_safe",
+        lambda date_str, ledger_root: SimpleNamespace(sessions=[_member(int(date_str[-2:]))]),
+    )
     monkeypatch.setattr(concurrency, "release_generation_slot", lambda *args, **kwargs: None)
     monkeypatch.setattr(api.threading, "Thread", PendingThread)
 
     try:
-        for day in range(1, 5):
-            api.post_recap(f"2026-07-{day:02d}", api.RecapRequestBody(force_regenerate=True))
+        for n in range(1, 5):
+            api.post_batch_summary(
+                f"2026-07-{n:02d}",
+                api.BatchRequestBody(sessions=[{"profile": "default", "session_id": f"2026070{n}_100000_bbb"}]),
+            )
         with pytest.raises(HTTPException) as exc:
-            api.post_recap("2026-07-05", api.RecapRequestBody(force_regenerate=True))
+            api.post_batch_summary(
+                "2026-07-05",
+                api.BatchRequestBody(sessions=[{"profile": "default", "session_id": "20260705_100000_bbb"}]),
+            )
         assert exc.value.status_code == 503
     finally:
         api._worker_pool.clear()

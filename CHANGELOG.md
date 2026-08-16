@@ -2,6 +2,25 @@
 
 All notable changes to Hermes Summarization Calendar are documented here.
 
+## 1.2.4 — 2026-08-16
+
+### Security
+- Replaced raw exception text in public worker-start error responses (batch and legacy recap routes) with fixed messages; full diagnostics are server-side logs only (QA finding 2).
+- **Retired legacy raw-transcript recap generation (QA finding 3):** `POST /recap` now returns a stable `410` (`recap_generation_retired`) and never invokes the summary model, closing the last route that bypassed the summary-only roll-up boundary. Read access (`GET /recap`, `GET /recap/versions`) and version management (`POST /recap/rollback`) for existing recaps are preserved; the daily roll-up is the only supported day-level generation.
+- Stopped embedding the Dashboard process ID in public job identifiers; queue responses now return an opaque random identifier (scan finding 3, CWE-200).
+- Added a shared boundary redactor (`error_policy`) for API-visible job error text, covering Linux and macOS paths, bearer and keyed credentials, credential-bearing URLs, PIDs, and long opaque secrets; all job-state errors are stored redacted (scan finding 6).
+- Created recap status directories and files with explicit owner-only permissions (0700/0600) instead of relying on the process umask (scan finding 5, CWE-276).
+
+### Fixed
+- Oversized session summaries no longer fail during multi-chunk reduction: segment summaries are now reduced hierarchically (packed into prompt-sized groups, reduced level by level), so sessions with five or more near-limit segment summaries complete instead of failing (QA finding 1).
+- Added cumulative per-job budgets: transcripts above the maximum source byte budget are rejected before the first provider call, and jobs exceeding the maximum provider call count are stopped with a stable error (scan finding 1, CWE-770).
+
+### Changed
+- The batch-toolbar generation UX (session-card checkboxes + shared `Summarize selected` toolbar) is now the approved interface, as recorded in `PROJECT-BRIEF.md`. This supersedes the v1.0 per-card `Generate summary` button, which was removed as clunky; the selection/batch scaffolding is retained in preparation for aggregate multi-session summarization (QA finding 4 resolved by brief amendment — no frontend change).
+
+### Verification
+- 483 backend tests pass, including new regressions for reduction, job budgets, worker-start hygiene, opaque batch job IDs, and the legacy-recap retirement contract; frontend suite 172 pass; full release gate passes for v1.2.4 without external network access.
+
 ## 1.2.3 — 2026-08-16
 
 ### Documentation

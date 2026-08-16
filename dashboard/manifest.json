@@ -3,7 +3,7 @@
   "label": "Calendar",
   "description": "Calendar view of Hermes session activity and cron runs with optional summary model-generated daily recaps.",
   "icon": "Clock",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "tab": {
     "path": "/calendar",
     "position": "after:analytics"

@@ -22,6 +22,10 @@ from .inventory import (
     build_day_inventory,
     discover_all,
 )
+from .limits import (
+    MAX_SESSION_PROVIDER_CALLS,
+    MAX_SESSION_SOURCE_BYTES,
+)
 from .recap_validator import SessionIdentity, sanitize_recap_summary, validate_summary_output
 from .session_storage import save_session_summary
 from .summary_jobs import (
@@ -178,6 +182,54 @@ def _build_reduction_prompt(
     )
 
 
+def _pack_reduction_groups(
+    date: str,
+    session: DailySession,
+    summaries: list[str],
+    safe_ceiling: int,
+) -> list[list[str]]:
+    """Greedily pack ``summaries`` into groups whose reduction prompt fits
+    under ``safe_ceiling`` bytes.
+
+    Each group holds at least one summary and every group's reduction prompt
+    fits under the ceiling by construction. In the normal case (summaries of
+    modest byte size) the first group of a list longer than one contains
+    at least two summaries, so the caller's hierarchical loop shrinks each
+    level. The pathological case (summaries so large that no two fit in one
+    prompt) is handled by the caller, which fails the job if a level does
+    not shrink instead of looping.
+    """
+    groups: list[list[str]] = []
+    current: list[str] = []
+    for summary in summaries:
+        candidate = current + [summary]
+        prompt_bytes = len(
+            _build_reduction_prompt(date, session, candidate).encode("utf-8")
+        )
+        if current and prompt_bytes > safe_ceiling:
+            groups.append(current)
+            current = [summary]
+        else:
+            current = candidate
+    if current:
+        groups.append(current)
+    return groups
+
+
+def _transcript_source_bytes(transcript) -> int:
+    """Total UTF-8 byte length of the transcript's message contents.
+
+    This is the *raw source* measure used by the cumulative per-job byte
+    budget (scan finding 1). It measures the stored transcript before chunking
+    or prompting, so the budget is enforced before any provider call.
+    """
+    total = 0
+    for message in transcript.messages:
+        if message.content:
+            total += len(message.content.encode("utf-8"))
+    return total
+
+
 def _ephemeral_conflict(
     date: str, profile: str, session_id: str
 ) -> SummaryJobStatus:
@@ -203,6 +255,8 @@ def generate_session_summary(
     cron_roots: list[CronRoot] | None = None,
     runner: Runner = run_auxiliary_compression,
     safe_ceiling: int = DEFAULT_SAFE_CEILING,
+    max_source_bytes: int = MAX_SESSION_SOURCE_BYTES,
+    max_provider_calls: int = MAX_SESSION_PROVIDER_CALLS,
     ledger_root: Path | None = None,
     hermes_home: Path | None = None,
     slot_reserved: bool = False,
@@ -259,6 +313,18 @@ def generate_session_summary(
                 ledger_root,
             )
 
+        # Cumulative per-job budget (scan finding 1): reject oversized
+        # sessions BEFORE any provider call with a stable, retryable error.
+        source_bytes = _transcript_source_bytes(transcript)
+        if source_bytes > max_source_bytes:
+            return fail_session_job(
+                date,
+                profile,
+                session_id,
+                f"Session transcript exceeds maximum job size ({source_bytes} > {max_source_bytes} bytes)",
+                ledger_root,
+            )
+
         # Use chunk_transcripts for lossless segmentation
         chunks: list[ChunkInfo] = chunk_transcripts(
             [transcript], safe_ceiling=safe_ceiling, date_str=date
@@ -271,8 +337,22 @@ def generate_session_summary(
         segment_summaries: list[str] = []
         segment_points: list[str] = []
         last_chunk_model: str | None = None
+        reduction_model: str | None = None
+        provider_calls = 0
 
         for index, chunk in enumerate(chunks):
+            # Cumulative call budget: fail before spending a call we cannot
+            # account for. Bounds provider quota and worker time per job.
+            if provider_calls + 1 > max_provider_calls:
+                return fail_session_job(
+                    date,
+                    profile,
+                    session_id,
+                    "Session exceeds the maximum number of provider calls for one summary job",
+                    ledger_root,
+                )
+            provider_calls += 1
+
             # Build session-specific prompt (content-only contract)
             # Use session_transcripts for the chunk, not chunk.prompt_text
             prompt = _build_session_chunk_prompt(chunk.session_transcripts, date)
@@ -303,38 +383,118 @@ def generate_session_summary(
         final_points = segment_points
 
         if len(segment_summaries) > 1:
-            reduction_prompt = _build_reduction_prompt(date, canonical, segment_summaries)
-
-            # Explicit prompt-size check before runner invocation (defense in depth)
-            reduction_bytes = len(reduction_prompt.encode("utf-8"))
-            if reduction_bytes > safe_ceiling:
-                return fail_session_job(
-                    date,
-                    profile,
-                    session_id,
-                    f"Reduction prompt exceeds size limit ({reduction_bytes} > {safe_ceiling} bytes)",
-                    ledger_root,
+            # Hierarchical reduction (QA finding 1 / scan finding 1): the
+            # single-pass design required ALL segment summaries to fit in ONE
+            # prompt, so five or more near-limit summaries (12,000 chars each
+            # against the 48 KiB ceiling) always failed. Instead, pack
+            # summaries into prompt-sized groups and reduce level by level
+            # until exactly one summary remains. Every level strictly shrinks
+            # the list, so this terminates.
+            current_summaries = list(segment_summaries)
+            while len(current_summaries) > 1:
+                groups = _pack_reduction_groups(
+                    date, canonical, current_summaries, safe_ceiling
                 )
 
-            reduction = _run(
-                runner,
-                reduction_prompt,
-                ledger_root,
-            )
-            reduction_model = getattr(reduction, "response_model", None)
-            try:
-                final_summary, reduced_points = _validated_item(
-                    reduction, canonical, "Segment reduction"
-                )
-                final_points = reduced_points or segment_points
-                generation_method = "reduced"
-            except ValueError:
-                final_summary = "\n\n".join(
-                    f"Part {index + 1}: {summary}"
-                    for index, summary in enumerate(segment_summaries)
-                )
-                final_points = segment_points
-                generation_method = "validated-segment-fallback"
+                if len(groups) == 1:
+                    # All remaining summaries fit in one reduction prompt.
+                    reduction_prompt = _build_reduction_prompt(
+                        date, canonical, current_summaries
+                    )
+                    reduction_bytes = len(reduction_prompt.encode("utf-8"))
+                    if reduction_bytes > safe_ceiling:
+                        return fail_session_job(
+                            date,
+                            profile,
+                            session_id,
+                            f"Reduction prompt exceeds size limit ({reduction_bytes} > {safe_ceiling} bytes)",
+                            ledger_root,
+                        )
+                    if provider_calls + 1 > max_provider_calls:
+                        return fail_session_job(
+                            date,
+                            profile,
+                            session_id,
+                            "Session exceeds the maximum number of provider calls for one summary job",
+                            ledger_root,
+                        )
+                    provider_calls += 1
+
+                    reduction = _run(runner, reduction_prompt, ledger_root)
+                    reduction_model = getattr(reduction, "response_model", None)
+                    try:
+                        final_summary, reduced_points = _validated_item(
+                            reduction, canonical, "Segment reduction"
+                        )
+                        final_points = reduced_points or segment_points
+                        generation_method = "reduced"
+                    except ValueError:
+                        final_summary = "\n\n".join(
+                            f"Part {index + 1}: {summary}"
+                            for index, summary in enumerate(current_summaries)
+                        )
+                        final_points = segment_points
+                        generation_method = "validated-segment-fallback"
+                    break
+
+                # Multiple prompt-sized groups: reduce each group now and
+                # continue with the group-level summaries next level.
+                next_level: list[str] = []
+                try:
+                    for group in groups:
+                        reduction_prompt = _build_reduction_prompt(
+                            date, canonical, group
+                        )
+                        reduction_bytes = len(reduction_prompt.encode("utf-8"))
+                        if reduction_bytes > safe_ceiling:
+                            return fail_session_job(
+                                date,
+                                profile,
+                                session_id,
+                                f"Reduction prompt exceeds size limit ({reduction_bytes} > {safe_ceiling} bytes)",
+                                ledger_root,
+                            )
+                        if provider_calls + 1 > max_provider_calls:
+                            return fail_session_job(
+                                date,
+                                profile,
+                                session_id,
+                                "Session exceeds the maximum number of provider calls for one summary job",
+                                ledger_root,
+                            )
+                        provider_calls += 1
+
+                        reduction = _run(runner, reduction_prompt, ledger_root)
+                        reduction_model = getattr(
+                            reduction, "response_model", None
+                        )
+                        group_summary, _group_points = _validated_item(
+                            reduction, canonical, "Segment reduction"
+                        )
+                        next_level.append(group_summary)
+                except ValueError:
+                    # A reduction level failed: fall back to the last fully
+                    # validated summary set (ordered, unchanged).
+                    final_summary = "\n\n".join(
+                        f"Part {index + 1}: {summary}"
+                        for index, summary in enumerate(current_summaries)
+                    )
+                    final_points = segment_points
+                    generation_method = "validated-segment-fallback"
+                    break
+                # Liveness guard: a level must strictly shrink the summary
+                # list. If the summaries are too large for any group to hold
+                # more than one, no reduction is possible; fail the job with
+                # a stable error instead of looping.
+                if len(next_level) >= len(current_summaries):
+                    return fail_session_job(
+                        date,
+                        profile,
+                        session_id,
+                        "Segment summaries cannot be reduced to a single summary within the prompt size limit",
+                        ledger_root,
+                    )
+                current_summaries = next_level
 
         refreshed = build_day_inventory(date, profiles, cron_roots)
         refreshed_session = _find_session(refreshed.sessions, profile, session_id)

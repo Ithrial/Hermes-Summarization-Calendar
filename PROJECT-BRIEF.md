@@ -21,7 +21,7 @@ The page automatically inventories Hermes activity by day and allows users to ma
 ### Manual summary session generation and optional daily roll-up
 
 - Days and sessions do not receive automatic summaries.
-- Every session card shows `Generate summary` when no current summary exists.
+- Session cards expose a selection checkbox; the shared batch toolbar summarizes one or more selected sessions. This is the approved generation UX: the per-card `Generate summary` button (present in v1.0) was deliberately removed as clunky, and the selection/batch interface doubles as the scaffolding for aggregate multi-session summarization (several related sessions summarized together as one).
 - Session generation uses the configured auxiliary compression profile via Hermes' built-in routing and never changes global model/delegation config.
 - Store each session summary independently as structured JSON plus readable Markdown outside the plugin code directory.
 - Key session artifacts by selected date plus the canonical composite identity `(profile, session_id)`. The model returns CONTENT-ONLY output (`summary` + `key_points`). Server-attached canonical identity is never trusted from model output and is always applied when saving.
@@ -32,6 +32,7 @@ The page automatically inventories Hermes activity by day and allows users to ma
 - Never silently overwrite an existing summary. Regeneration must preserve an immutable timestamped prior version and require an explicit replace flag.
 - Validate output before publishing it atomically.
 - Offer an optional daily roll-up built only from saved session-summary artifacts and compact cron status metadata, never from the day's raw transcripts.
+- Legacy raw-transcript recap generation is retired (v1.2.4, QA finding 3): `POST /recap` always returns `410` and never invokes the summary model. Existing stored recaps remain readable (`GET /recap`, `GET /recap/versions`) and restorable (`POST /recap/rollback`) for migration; the daily roll-up is the only supported day-level generation.
 - A roll-up records exact included session identities, summary versions/fingerprints, and coverage (summarized sessions versus active sessions); partial coverage must be visible.
 - A roll-up becomes stale when its included summary version/fingerprint changes or the active session set changes.
 - Do not publish summaries or roll-ups to BookStack or Mnemosyne automatically.

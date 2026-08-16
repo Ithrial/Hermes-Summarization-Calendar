@@ -5,4 +5,4 @@ grouped by America/Chicago calendar day.  This package never writes to
 Hermes state databases or cron stores.
 """
 
-__version__ = "1.2.3"
+__version__ = "1.2.4"

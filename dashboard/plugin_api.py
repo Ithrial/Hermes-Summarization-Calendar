@@ -9,7 +9,7 @@ Endpoints:
 - GET  /month
 - GET  /day
 - GET  /recap?date=YYYY-MM-DD
-- POST /recap?date=YYYY-MM-DD
+- POST /recap?date=YYYY-MM-DD   (retired in v1.2.4: always 410)
 - GET  /recap/versions?date=YYYY-MM-DD
 - POST /recap/rollback?date=YYYY-MM-DD&version=...
 """
@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import importlib.util
 import logging
-import os
 import re
 import secrets
 import sys
@@ -85,7 +84,7 @@ from hermes_summarization_calendar.concurrency import (  # noqa: F401
     load_status as _load_job_status,
     recover_stale_locks,
 )
-from hermes_summarization_calendar.recap_orchestrator import check_recap_status, generate_recap
+from hermes_summarization_calendar.recap_orchestrator import check_recap_status
 from hermes_summarization_calendar.recap_storage import (  # noqa: F401
     get_ledger_root,
     list_versions as _list_versions,
@@ -141,7 +140,8 @@ _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _PROFILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,191}$")
 
-# Background worker thread pool for recap generation
+# Background worker thread pool for session/roll-up/batch summary generation
+# (legacy raw-transcript recap generation was retired in v1.2.4)
 _worker_pool: dict[str, threading.Thread] = {}
 _worker_lock = threading.Lock()
 
@@ -310,26 +310,6 @@ def _run_rollup_worker(date_str: str, pool_key: str) -> None:
             pass
     finally:
         _remove_worker(pool_key)
-
-
-def _run_recap_worker(date_str: str) -> None:
-    """Background worker that runs the full recap generation pipeline."""
-    try:
-        result = generate_recap(date=date_str)
-        if result.status == "completed":
-            logger.info(
-                f"Recap generation completed for {date_str}: {result.version_id}"
-            )
-        else:
-            logger.error(
-                f"Recap generation failed for {date_str}: {result.error}"
-            )
-    except Exception as exc:
-        logger.exception(f"Unexpected error in recap worker for {date_str}: {exc}")
-    finally:
-        with _worker_lock:
-            if _worker_pool.get(date_str) is threading.current_thread():
-                _worker_pool.pop(date_str, None)
 
 
 # ---------------------------------------------------------------------------
@@ -515,106 +495,40 @@ def get_recap(
 # POST /recap
 # ---------------------------------------------------------------------------
 
-@router.post("/recap", status_code=202)
+@router.post("/recap", status_code=410)
 def post_recap(
     date_str: str = Query(..., alias="date", description="Calendar date in YYYY-MM-DD format"),
     body: RecapRequestBody | None = Body(default=None),
 ) -> dict[str, Any]:
-    """Queue recap generation for a given date.
+    """Legacy raw-transcript recap generation -- RETIRED in v1.2.4.
 
-    Returns 202 with job status promptly; generation runs in background.
-    If a recap exists and ``force_regenerate`` is not true, returns 400.
-    If a generation is already running for the same date, returns 409.
+    The project contract (PROJECT-BRIEF.md) requires daily roll-ups to be
+    built only from saved session-summary artifacts, never from a day's raw
+    transcripts. This endpoint was the last route that fed raw transcripts
+    to the summary model (QA finding 3), so generation is retired: every
+    request returns 410 with a fixed message and has no generation side
+    effects (no slot, no worker, no job).
 
-    Body shape::
+    Read and management access for existing recaps is preserved:
+    GET /recap, GET /recap/versions, and POST /recap/rollback.
 
-        {"force_regenerate": true}  # overwrite existing recap
+    The request signature (date query + optional ``force_regenerate`` body)
+    is kept stable so pre-v1.2.4 clients receive this clear, stable
+    retirement response instead of a validation error.
     """
     _validate_date(date_str)
-
-    # Ensure stale recovery has run before direct POST (not only /health)
-    _ensure_startup()
-
-    force = body.force_regenerate if body else False
-
-    ledger_root = get_ledger_root()
-
-    # Existing recap requires explicit force flag
-    existing = recap_exists(date_str, ledger_root)
-    if existing and not force:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "error": "recap_already_exists",
-                "message": f"Recap for {date_str} already exists. Set force_regenerate=true to overwrite.",
-            },
-        )
-
-    # Check for concurrent generation (per-date 409)
-    if not acquire_generation_slot(date_str, ledger_root):
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "error": "concurrent_request",
-                "message": f"Recap generation for {date_str} is already in progress",
-            },
-        )
-
-    # Construct the thread before reserving its pool entry.  The reservation is
-    # inserted while holding the same lock as the capacity check, so pending
-    # (not-yet-started) workers count toward the limit too.
-    worker = threading.Thread(
-        target=_run_recap_worker,
-        args=(date_str,),
-        daemon=True,
-        name=f"recap-worker-{date_str}",
+    raise HTTPException(
+        status_code=410,
+        detail={
+            "error": "recap_generation_retired",
+            "message": (
+                "Legacy recap generation is retired in v1.2.4. Use "
+                "POST /session-summary/batch for session summaries or "
+                "POST /rollup for the daily roll-up; read access for "
+                "existing recaps remains at GET /recap."
+            ),
+        },
     )
-
-    # Enforce global max concurrency bound across all dates and reserve a slot.
-    with _worker_lock:
-        active_count = len(_worker_pool)
-        if active_count >= _MAX_CONCURRENCY:
-            # Release the per-date slot we just acquired — worker will never run
-            from hermes_summarization_calendar.concurrency import release_generation_slot
-            try:
-                release_generation_slot(date_str)
-            except Exception:
-                pass
-            raise HTTPException(
-                status_code=503,
-                detail={
-                    "error": "too_many_workers",
-                    "message": f"Maximum {_MAX_CONCURRENCY} concurrent recap workers active. Try again shortly.",
-                },
-            )
-        _worker_pool[date_str] = worker
-
-    try:
-        worker.start()
-    except (RuntimeError, OSError) as exc:
-        # Thread failed to start — remove pool entry and release durable slot
-        with _worker_lock:
-            if _worker_pool.get(date_str) is worker:
-                _worker_pool.pop(date_str, None)
-        from hermes_summarization_calendar.concurrency import release_generation_slot
-        try:
-            release_generation_slot(date_str)
-        except Exception:
-            pass
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "error": "worker_start_failed",
-                "message": f"Failed to start recap worker for {date_str}: {exc}",
-            },
-        )
-
-    job_id = f"recap-{date_str}-{os.getpid()}"
-
-    return {
-        "status": "queued",
-        "job_id": job_id,
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -1218,11 +1132,13 @@ def post_batch_summary(
         except Exception:
             pass
 
+        # Fixed public message; full diagnostics are server-side only.
+        logger.exception("Batch worker thread start failed for %s batch %s", date_str, batch_id)
         raise HTTPException(
             status_code=500,
             detail={
                 "error": "worker_start_failed",
-                "message": f"Failed to start batch worker: {exc}",
+                "message": "Failed to start batch worker. Try again shortly.",
             },
         )
 
