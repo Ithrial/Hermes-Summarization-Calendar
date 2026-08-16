@@ -2,7 +2,8 @@
 
 ## Supported versions
 
-Security fixes are applied to the current `1.0.x` line until a newer stable line replaces it.
+Security fixes target the current `1.2.x` stable line. Older release lines are
+not guaranteed to receive security fixes.
 
 ## Trust boundary
 
@@ -17,7 +18,9 @@ Hermes Dashboard backend plugin routes use the Dashboard's local trust model and
 - Summary artifacts can contain sensitive information derived from conversations and tool activity. Protect the Hermes home directory and backups accordingly.
 - Manual summary generation sends the selected transcript slice to the configured compression provider. A remote provider receives that content under its own privacy terms.
 - The plugin does not require or ship API keys. Provider credentials remain managed by Hermes.
-- Error messages and API responses are sanitized to avoid exposing filesystem paths, process IDs, and credential-like values.
+- Known filesystem paths, process IDs, and credential-like values are removed
+  from normal health, job-status, generation-error, and batch-creation error
+  responses. API routes must not return raw internal exception text.
 
 ## Release hygiene
 
@@ -33,7 +36,13 @@ Release archives must not contain:
 
 ## Reporting a vulnerability
 
-Do not open a public issue containing private session data, credentials, filesystem paths, or exploit details. Contact the repository maintainer privately through the security-reporting method configured on the repository. Include:
+Do not open a public issue containing private session data, credentials,
+filesystem paths, or exploit details. Use GitHub's private vulnerability
+reporting form:
+
+<https://github.com/Ithrial/Hermes-Summarization-Calendar/security/advisories/new>
+
+Include:
 
 - affected Summarization Calendar version;
 - Hermes Agent version;
@@ -43,4 +52,6 @@ Do not open a public issue containing private session data, credentials, filesys
 
 ## Scope notes
 
-Native Windows is not supported in v1.0 because artifact locking uses POSIX `fcntl`. The included lifecycle scripts require Bash and GNU coreutils. These are compatibility limits, not security guarantees.
+Native Windows is not supported in the `1.2.x` release line because artifact
+locking uses POSIX `fcntl`. The included lifecycle scripts also require Bash
+and GNU coreutils. These are compatibility limits, not security guarantees.

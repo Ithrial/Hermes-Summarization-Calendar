@@ -70,6 +70,63 @@ class TestDateValidation:
         assert resp.status_code == 200
 
 
+@pytest.mark.skipif(not HAS_TC, reason="TestClient not available")
+class TestBatchErrorSanitization:
+    def test_batch_creation_error_does_not_leak_internal_details(
+        self, empty_hermes_home, monkeypatch
+    ):
+        """Batch creation failures must not expose paths or credential-like text."""
+        import plugin_api
+        from fastapi import FastAPI
+
+        os.environ["HERMES_HOME"] = str(empty_hermes_home)
+        app = FastAPI()
+        app.include_router(
+            plugin_api.router,
+            prefix="/api/plugins/summarization-calendar",
+        )
+
+        monkeypatch.setattr(plugin_api, "_startup_done", True)
+        monkeypatch.setattr(
+            plugin_api,
+            "_build_day_inventory_safe",
+            lambda _date, _root: type(
+                "Inventory", (), {
+                    "sessions": [
+                        type(
+                            "Session", (), {
+                                "profile": "default",
+                                "session_id": "session-1",
+                            }
+                        )()
+                    ]
+                }
+            )(),
+        )
+
+        def raise_internal_error(*_args, **_kwargs):
+            raise OSError(
+                "/root/.hermes/config.yaml bearer SECRET_DO_NOT_RETURN"
+            )
+
+        monkeypatch.setattr(plugin_api, "create_batch_job", raise_internal_error)
+
+        response = TestClient(app).post(
+            "/api/plugins/summarization-calendar/session-summary/batch?date=2026-08-16",
+            json={
+                "sessions": [
+                    {"profile": "default", "session_id": "session-1"}
+                ]
+            },
+        )
+
+        assert response.status_code == 500
+        body = response.json()
+        assert body["detail"]["message"] == "Batch creation failed"
+        assert "/root/.hermes" not in str(body)
+        assert "SECRET_DO_NOT_RETURN" not in str(body)
+
+
 # ====================================================================
 # 2. Fingerprint must hash FULL content (not truncated to 200 chars)
 # ====================================================================

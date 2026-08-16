@@ -60,8 +60,8 @@ sha256sum -c SHA256SUMS
 Extract it anywhere, then install an atomic copy:
 
 ```bash
-tar -xzf hermes-summarization-calendar-v1.0.0.tar.gz
-cd hermes-summarization-calendar-v1.0.0
+tar -xzf hermes-summarization-calendar-v1.2.2.tar.gz
+cd hermes-summarization-calendar-v1.2.2
 ./scripts/install-local.sh --copy
 ```
 
@@ -197,12 +197,12 @@ The test runner executes backend tests with outbound non-loopback sockets blocke
 Build release archives from a clean committed tree:
 
 ```bash
-./scripts/build-release.sh --ref v1.0.0
+./scripts/build-release.sh --ref v1.2.2
 ```
 
 See `CONTRIBUTING.md` and `docs/RELEASE.md`.
 
-## Known v1.0 limits
+## Known 1.2.x limits
 
 - Day boundaries are fixed to `America/Chicago`.
 - Daily roll-ups summarize saved session summaries rather than re-ingesting all raw transcripts.
