@@ -25,10 +25,10 @@ Summarization Calendar does not patch Hermes core. It inventories Hermes session
 - Hermes Agent with the native Web Dashboard plugin SDK and backend plugin API loader.
 - A Hermes build that provides `agent.auxiliary_client.call_llm` and a working `auxiliary.compression` route.
 - Python 3.11 or newer in the Dashboard runtime.
-- Linux for v1.1. Artifact locking uses POSIX `fcntl`; the supplied lifecycle scripts also use Bash and GNU coreutils.
+- Linux for the `1.2.x` release line. Artifact locking uses POSIX `fcntl`; the supplied lifecycle scripts also use Bash and GNU coreutils.
 - Node.js 20 or newer only for development tests; users install the prebuilt frontend bundle.
 
-The v1.1 release was validated on Hermes Agent v0.19.0 (2026.7.20), Python 3.11, and Node.js 23. Newer Hermes releases may change plugin contracts; see the compatibility notes in `SECURITY.md` and run the included validation before publishing or deploying an update.
+The v1.2.3 release was validated on Hermes Agent v0.20.1 (2026.8.13), Python 3.11, and Node.js 23. Newer Hermes releases may change plugin contracts; see the compatibility notes in `SECURITY.md` and run the included validation before publishing or deploying an update.
 
 ## Install
 
@@ -51,21 +51,34 @@ which does not manage Dashboard-only packages that have no root
 
 ### From a release archive
 
-Verify the downloaded archive first:
+Set the release version, download the archive and checksum manifest from the
+GitHub release, and verify the exact archive before extracting it:
 
 ```bash
-sha256sum -c SHA256SUMS
+VERSION=1.2.3
+ARCHIVE="hermes-summarization-calendar-v${VERSION}.tar.gz"
+RELEASE_URL="https://github.com/Ithrial/Hermes-Summarization-Calendar/releases/download/v${VERSION}"
+
+curl -fsSLO "${RELEASE_URL}/${ARCHIVE}"
+curl -fsSLO "${RELEASE_URL}/SHA256SUMS"
+grep "${ARCHIVE}$" SHA256SUMS | sha256sum -c -
 ```
 
-Extract it anywhere, then install an atomic copy:
+Extract it anywhere, then install a production copy:
 
 ```bash
-tar -xzf hermes-summarization-calendar-v1.2.2.tar.gz
-cd hermes-summarization-calendar-v1.2.2
-./scripts/install-local.sh --copy
+tar -xzf "${ARCHIVE}"
+cd "hermes-summarization-calendar-v${VERSION}"
+HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}" ./scripts/install-local.sh --copy
 ```
 
-`--copy` is recommended for normal use. `--symlink` is available for development.
+Use `--copy` for a normal release installation. The installer stages the
+replacement, snapshots any existing plugin, and atomically swaps the staged
+copy into place. If the swap fails, it attempts to restore the previous plugin.
+It never removes generated summaries or other data under `HERMES_HOME`.
+
+`--symlink` is available for development installations, but is not the normal
+release-update mode.
 
 ### From Git
 
@@ -81,6 +94,11 @@ Or clone elsewhere and run:
 ```bash
 ./scripts/install-local.sh --copy
 ```
+
+The Git method is useful for development or a first install. For a release
+update, use the checksum-verified release archive and `--copy`; do not run
+`git pull` inside an installed release copy because that bypasses the install
+backup and atomic-swap workflow.
 
 ### Load the backend
 
@@ -155,6 +173,11 @@ A pre-existing installation is snapshotted under:
 $HERMES_HOME/backups/summarization-calendar-install/
 ```
 
+Each snapshot has a generated backup ID and contains the previous plugin plus a
+manifest. The snapshot is created before the replacement is swapped into place,
+so it is the rollback handle for that update. Generated summaries remain under
+`$HERMES_HOME/summarization-calendar` and are not part of the plugin swap.
+
 List rollback IDs:
 
 ```bash
@@ -197,7 +220,7 @@ The test runner executes backend tests with outbound non-loopback sockets blocke
 Build release archives from a clean committed tree:
 
 ```bash
-./scripts/build-release.sh --ref v1.2.2
+./scripts/build-release.sh --ref v1.2.3
 ```
 
 See `CONTRIBUTING.md` and `docs/RELEASE.md`.

@@ -38,26 +38,30 @@ Screenshots are publication assets rather than runtime dependencies. Use only sy
 
 ## Tag and build
 
-Create the annotated tag only after the gate is green:
+Create the annotated tag only after the gate is green. Use the release version
+being published; the example below shows the current `v1.2.3` release:
 
 ```bash
-git tag -a v1.0.0 -m "Hermes Summarization Calendar v1.0.0"
-./scripts/build-release.sh --ref v1.0.0
+VERSION=1.2.3
+git tag -a "v${VERSION}" -m "Hermes Summarization Calendar v${VERSION}"
+./scripts/build-release.sh --ref "v${VERSION}"
 ```
 
 The builder refuses a dirty tree, validates the selected Git ref, writes artifacts under `artifacts/`, and verifies both archives before reporting success.
 
 ## Clean-room install verification
 
-Use a temporary Hermes home and the extracted archive:
+Use a temporary Hermes home and the extracted archive. Set `VERSION` to the
+release being verified:
 
 ```bash
+VERSION=1.2.3
 workdir="$(mktemp -d)"
-tar -xzf artifacts/hermes-summarization-calendar-v1.0.0.tar.gz -C "$workdir"
+tar -xzf "artifacts/hermes-summarization-calendar-v${VERSION}.tar.gz" -C "$workdir"
 HERMES_HOME="$workdir/hermes-home" \
-  "$workdir/hermes-summarization-calendar-v1.0.0/scripts/install-local.sh" --copy
+  "$workdir/hermes-summarization-calendar-v${VERSION}/scripts/install-local.sh" --copy
 HERMES_HOME="$workdir/hermes-home" \
-  "$workdir/hermes-summarization-calendar-v1.0.0/scripts/status-local.sh"
+  "$workdir/hermes-summarization-calendar-v${VERSION}/scripts/status-local.sh"
 ```
 
 Then import `dashboard/plugin_api.py` by file path with the actual Dashboard interpreter and verify its route set. Do not use a test-only `PYTHONPATH` for that loader check.
@@ -67,11 +71,12 @@ Then import `dashboard/plugin_api.py` by file path with the actual Dashboard int
 A release archive contains only the selected source snapshot; it does not contain Git history. Before publishing an existing development repository, audit every commit reachable from the public branch. If that history contains operator paths, private backend names, captures, or other local details, create the public repository from the verified extracted archive instead:
 
 ```bash
-cd /path/to/extracted/hermes-summarization-calendar-v1.0.0
+VERSION=1.2.3
+cd "/path/to/extracted/hermes-summarization-calendar-v${VERSION}"
 git init -b main
 git add .
-git commit -m "release: Hermes Summarization Calendar v1.0.0"
-git tag -a v1.0.0 -m "Hermes Summarization Calendar v1.0.0"
+git commit -m "release: Hermes Summarization Calendar v${VERSION}"
+git tag -a "v${VERSION}" -m "Hermes Summarization Calendar v${VERSION}"
 ```
 
 Before publishing:

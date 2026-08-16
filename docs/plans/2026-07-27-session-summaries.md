@@ -1,5 +1,8 @@
 # Per-Session Summary Model Summaries and Daily Roll-Up Implementation Plan
 
+> **Historical implementation plan.** Current user-facing behavior and release
+> procedures are documented in `README.md`, `SECURITY.md`, and `docs/RELEASE.md`.
+
 > **For Hermes:** Use subagent-driven-development skill to implement this plan task-by-task.
 
 **Goal:** Replace raw whole-day recap generation with independently versioned per-session summary-model summaries and an optional daily roll-up generated only from saved summaries plus compact cron status metadata.

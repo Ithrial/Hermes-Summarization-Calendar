@@ -1,7 +1,12 @@
 # Summarization Calendar Plugin Implementation Plan
 **Date:** 2026-07-26
 **Plugin:** `hermes-summarization-calendar` (standalone)
-**Workspace:** `/home/user/Hermes-Workspace/hermes-summarization-calendar`
+**Workspace:** `<repository-root>`
+
+> **Historical implementation plan.** This document records the original v1.0
+> design and examples. Current behavior and release procedures are defined by
+> `README.md`, `SECURITY.md`, and `docs/RELEASE.md`. Paths below use
+> `$HERMES_HOME` where they describe runtime data.
 
 ---
 
@@ -116,7 +121,8 @@ CREATE TABLE executions (
 
 ### 3. JSON Contract: `/api/plugins/summarization-calendar/`
 
-All paths under `/api/plugins/summarization-calendar/` require dashboard auth token.
+The plugin relies on the Dashboard's surrounding authentication middleware;
+the plugin does not add duplicate route-level authentication.
 
 #### 3.1 GET `/month?year=2026&month=7`
 **Response:**
@@ -174,7 +180,7 @@ All paths under `/api/plugins/summarization-calendar/` require dashboard auth to
       "claimed_at": "2026-07-01T09:00:00Z",
       "started_at": "2026-07-01T09:00:01Z",
       "finished_at": "2026-07-01T09:01:23Z",
-      "output_path": "/home/user/.hermes/cron/output/xyz789/1722495600.md"
+      "output_path": "$HERMES_HOME/cron/output/xyz789/1722495600.md"
     }
   ]
 }
@@ -193,7 +199,7 @@ All paths under `/api/plugins/summarization-calendar/` require dashboard auth to
     "model": "response-model-id",
     "fingerprint": "sha256:1234abcd...",
     "source_fingerprint": "sha256:abcd1234...",
-    "previous_version_path": "/home/user/.hermes/summarization-calendar/versions/2026-07-01/20260701T183000Z"
+    "previous_version_path": "$HERMES_HOME/summarization-calendar/versions/2026-07-01/20260701T183000Z"
   },
   "data": {
     "session_summaries": [
@@ -246,8 +252,8 @@ All paths under `/api/plugins/summarization-calendar/` require dashboard auth to
 ```json
 {
   "status": "restored",
-  "previous_version_path": "/home/user/.hermes/summarization-calendar/versions/2026-07-01/20260701T183000Z",
-  "new_current_path": "/home/user/.hermes/summarization-calendar/recaps/2026-07-01"
+  "previous_version_path": "$HERMES_HOME/summarization-calendar/versions/2026-07-01/20260701T183000Z",
+  "new_current_path": "$HERMES_HOME/summarization-calendar/recaps/2026-07-01"
 }
 ```
 
@@ -265,10 +271,10 @@ All paths under `/api/plugins/summarization-calendar/` require dashboard auth to
     "message": "Idle"
   },
   "storage": {
-    "inventory_dir": "/home/user/.hermes/summarization-calendar/inventory",
-    "recaps_dir": "/home/user/.hermes/summarization-calendar/recaps",
-    "versions_dir": "/home/user/.hermes/summarization-calendar/versions",
-    "scans_dir": "/home/user/.hermes/summarization-calendar/scans",
+    "inventory_dir": "$HERMES_HOME/summarization-calendar/inventory",
+    "recaps_dir": "$HERMES_HOME/summarization-calendar/recaps",
+    "versions_dir": "$HERMES_HOME/summarization-calendar/versions",
+    "scans_dir": "$HERMES_HOME/summarization-calendar/scans",
     "disk_usage_bytes": 1234567
   },
   "version": "1.0.0"
@@ -798,7 +804,7 @@ docs: correct daily ledger plan against live schemas
 
 ## Final Deliverable
 
-**Plan file:** `/home/user/Hermes-Workspace/hermes-summarization-calendar/docs/plans/2026-07-26-summarization-calendar-implementation.md`
+**Plan file:** `<repository-root>/docs/plans/2026-07-26-summarization-calendar-implementation.md`
 
 ---
 

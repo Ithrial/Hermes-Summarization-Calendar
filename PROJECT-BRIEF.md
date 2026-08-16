@@ -39,8 +39,8 @@ The page automatically inventories Hermes activity by day and allows users to ma
 ## Safety and rollback
 
 - Develop in this standalone repository, not in the Hermes Agent core checkout.
-- Install under `~/.hermes/plugins/summarization-calendar` via a symlink or atomic copy.
-- Persist ledger data under `~/.hermes/summarization-calendar`, never under the plugin installation directory.
+- Install under `${HERMES_HOME:-$HOME/.hermes}/plugins/summarization-calendar` via a symlink or atomic copy.
+- Persist ledger data under `${HERMES_HOME:-$HOME/.hermes}/summarization-calendar`, unless the explicit `LEDGER_ROOT` override is set; never store it under the plugin installation directory.
 - Include scripts or documented commands for install, status, uninstall/rollback, and reinstall.
 - Installation must back up any pre-existing `summarization-calendar` plugin before replacement.
 - Rollback must remove/restore plugin code without deleting ledger data.
@@ -60,7 +60,7 @@ The page automatically inventories Hermes activity by day and allows users to ma
 9. Rollback/uninstall is exercised, Dashboard returns to the prior plugin set, ledger data remains, and reinstall restores functionality.
 10. Only after all gates pass: publish a public standalone repository with MIT license, README, screenshots, install/rollback instructions, security notes, and a release artifact/checksum.
 
-## Scope exclusions for v1
+## Current scope exclusions
 
 - No automatic nightly recaps.
 - No BookStack or Mnemosyne publishing.

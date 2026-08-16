@@ -56,5 +56,5 @@ Use concise conventional subjects such as:
 ```text
 fix: preserve summary version during failed regeneration
 feat: add configurable calendar timezone
-chore: prepare v1.0.1 release
+chore: prepare <version> release
 ```
