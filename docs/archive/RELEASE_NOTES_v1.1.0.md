@@ -1,5 +1,9 @@
 # Hermes Daily Ledger v1.1.0 Release Notes
 
+> **Historical release notes.** The project was renamed to Hermes Summarization
+> Calendar in v1.2.0. For current installation and upgrade instructions, see
+> the repository `README.md`.
+
 ## Added
 
 - Exact profile-scoped session links in the Calendar dashboard. Clicking a session title navigates directly to `/chat?resume=<session_id>&profile=<profile>` with sanitized text and exact URL encoding.

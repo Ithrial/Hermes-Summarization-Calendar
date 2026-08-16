@@ -2,6 +2,13 @@
 
 All notable changes to Hermes Summarization Calendar are documented here.
 
+## 1.2.3 — 2026-08-16
+
+### Documentation
+- Documented the complete checksum-verified release update flow, atomic plugin replacement, backup/rollback behavior, and Dashboard restart step.
+- Updated active release procedures and compatibility statements from v1.0/v1.1 to the current release line.
+- Marked historical release notes and implementation plans so legacy names and design contracts are not mistaken for current behavior.
+
 ## 1.2.2 — 2026-08-16
 
 ### Security
