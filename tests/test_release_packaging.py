@@ -42,7 +42,7 @@ def test_required_release_files_exist() -> None:
 def test_manifest_declares_v1_semver_and_expected_runtime_files() -> None:
     manifest = json.loads((REPO / "dashboard" / "manifest.json").read_text())
     assert manifest["name"] == "summarization-calendar"
-    assert manifest["version"] == "1.2.1"
+    assert manifest["version"] == "1.2.2"
     assert re.fullmatch(r"\d+\.\d+\.\d+", manifest["version"])
     for field in ("entry", "css", "api"):
         assert (REPO / "dashboard" / manifest[field]).is_file(), field

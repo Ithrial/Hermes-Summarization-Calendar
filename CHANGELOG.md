@@ -2,6 +2,13 @@
 
 All notable changes to Hermes Summarization Calendar are documented here.
 
+## 1.2.2 — 2026-08-16
+
+### Security
+- Prevented batch-creation failures from returning raw internal exception text, filesystem paths, or credential-like values in API responses.
+- Added a regression test covering path and credential-like value disclosure.
+- Corrected the security policy's supported-version, sanitization, Windows-scope, and private-reporting guidance.
+
 ## 1.2.1 — 2026-08-16
 
 ### Fixed
