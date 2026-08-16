@@ -1144,13 +1144,21 @@ def post_batch_summary(
             regenerate_current=bool(body.regenerate_current),
         )
     except (ValueError, OSError) as exc:
+        # Do not return the exception text: storage/provider errors can contain
+        # absolute paths or credential-like values. Keep the public response
+        # generic and log only the exception class for local diagnosis.
+        logger.error(
+            "Batch creation failed for %s (%s)",
+            date_str,
+            type(exc).__name__,
+        )
         raise HTTPException(
             status_code=500,
             detail={
                 "error": "batch_creation_failed",
-                "message": str(exc),
+                "message": "Batch creation failed",
             },
-        )
+        ) from None
 
     # Now reserve a worker pool slot and create the coordinator thread
     pool_key = f"batch:{date_str}:{batch_id}"
