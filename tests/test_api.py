@@ -281,52 +281,6 @@ class TestWorkerStartErrorHygiene:
 
         return FailingThread
 
-    def test_recap_worker_start_failure_has_fixed_message(self, test_hermes_home, monkeypatch):
-        home, _ = test_hermes_home
-        app = _make_app(home)
-        import plugin_api as api_mod  # type: ignore[import-not-found]
-
-        monkeypatch.setattr(api_mod.threading, "Thread", self._failing_thread_factory())
-        with api_mod._worker_lock:
-            api_mod._worker_pool.clear()
-
-        client = TestClient(app)
-        resp = client.post(
-            "/api/plugins/summarization-calendar/recap",
-            params={"date": "2026-03-08"},
-            json={"force_regenerate": True},
-        )
-
-        assert resp.status_code == 500
-        detail = resp.json()["detail"]
-        assert detail["error"] == "worker_start_failed"
-        body = resp.text
-        assert "/private/secret/path" not in body
-        assert "token_live_abcdef" not in body
-        assert "RuntimeError" not in body
-        # Fixed public message, date included, no exception text
-        assert "2026-03-08" in detail["message"]
-        assert "Try again shortly" in detail["message"]
-
-    def test_recap_job_id_does_not_disclose_pid(self, test_hermes_home, monkeypatch):
-        home, _ = test_hermes_home
-        app = _make_app(home)
-        client = TestClient(app)
-
-        resp = client.post(
-            "/api/plugins/summarization-calendar/recap",
-            params={"date": "2026-03-08"},
-            json={"force_regenerate": True},
-        )
-
-        assert resp.status_code == 202
-        job_id = resp.json()["job_id"]
-        # Opaque random suffix: 16 hex chars, never the process ID
-        suffix = job_id.rsplit("-", 1)[-1]
-        assert len(suffix) == 16
-        int(suffix, 16)
-        assert str(os.getpid()) not in job_id
-
     def test_batch_worker_start_failure_has_fixed_message(self, test_hermes_home, monkeypatch):
         home, _ = test_hermes_home
         app = _make_app(home)
@@ -363,3 +317,180 @@ class TestWorkerStartErrorHygiene:
         assert "/private/secret/path" not in body
         assert "token_live_abcdef" not in body
         assert "Try again shortly" in detail["message"]
+
+    def test_batch_job_id_does_not_disclose_pid(self, test_hermes_home):
+        """Batch queue identifiers must be opaque random values, never PIDs."""
+        home, _ = test_hermes_home
+        app = _make_app(home)
+        import plugin_api as api_mod  # type: ignore[import-not-found]
+        from hermes_summarization_calendar.inventory import discover_all  # type: ignore[import-not-found]
+
+        profiles, cron_roots = discover_all(home)
+        sessions = api_mod.build_day_inventory("2026-03-08", profiles, cron_roots).sessions
+        assert sessions, "fixture day must contain sessions"
+        first = sessions[0]
+
+        client = TestClient(app)
+        resp = client.post(
+            "/api/plugins/summarization-calendar/session-summary/batch",
+            params={"date": "2026-03-08"},
+            json={
+                "sessions": [
+                    {"profile": first.profile, "session_id": first.session_id}
+                ],
+                "regenerate_current": False,
+            },
+        )
+
+        assert resp.status_code == 202
+        batch_id = resp.json()["batch_id"]
+        # Opaque random suffix: 16 hex chars, never the process ID (scan #3)
+        suffix = batch_id.rsplit("-", 1)[-1]
+        assert len(suffix) == 16
+        int(suffix, 16)
+        assert str(os.getpid()) not in batch_id
+
+
+class TestLegacyRecapRetirement:
+    """v1.2.4: legacy raw-transcript recap generation is retired (QA #3).
+
+    The project contract requires daily roll-ups to consume only saved
+    session-summary artifacts, never raw transcripts. POST /recap was the
+    last route that fed raw transcripts to the model, so it now returns a
+    stable 410 with no generation side effects. Read access (GET /recap,
+    GET /recap/versions) and version management (POST /recap/rollback)
+    remain, and existing stored recaps are never touched.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _clean_worker_pool(self):
+        import plugin_api as api_mod  # type: ignore[import-not-found]
+
+        with api_mod._worker_lock:
+            api_mod._worker_pool.clear()
+        yield
+        with api_mod._worker_lock:
+            api_mod._worker_pool.clear()
+
+    def test_post_recap_returns_410_with_fixed_message(self, test_hermes_home):
+        home, _ = test_hermes_home
+        app = _make_app(home)
+        client = TestClient(app)
+
+        resp = client.post(
+            "/api/plugins/summarization-calendar/recap",
+            params={"date": "2026-03-08"},
+        )
+
+        assert resp.status_code == 410
+        detail = resp.json()["detail"]
+        assert detail["error"] == "recap_generation_retired"
+        message = detail["message"]
+        # Points callers at the supported generation paths.
+        assert "session-summary/batch" in message
+        assert "/rollup" in message
+        # Fixed message: no exception text, no internals.
+        assert "RuntimeError" not in message
+
+    def test_post_recap_with_force_body_still_410(self, test_hermes_home):
+        """Pre-v1.2.4 clients send {"force_regenerate": true}; still a clean 410."""
+        home, _ = test_hermes_home
+        app = _make_app(home)
+        client = TestClient(app)
+
+        resp = client.post(
+            "/api/plugins/summarization-calendar/recap",
+            params={"date": "2026-03-08"},
+            json={"force_regenerate": True},
+        )
+
+        assert resp.status_code == 410
+        assert resp.json()["detail"]["error"] == "recap_generation_retired"
+
+    def test_post_recap_invalid_date_still_400(self, test_hermes_home):
+        """Input validation runs before retirement, keeping 400 semantics."""
+        home, _ = test_hermes_home
+        app = _make_app(home)
+        client = TestClient(app)
+
+        resp = client.post(
+            "/api/plugins/summarization-calendar/recap",
+            params={"date": "bad-date"},
+        )
+
+        assert resp.status_code == 400
+
+    def test_post_recap_retired_no_generation_side_effects(self, test_hermes_home, tmp_path):
+        """Retirement must not acquire slots, spawn workers, or queue jobs."""
+        import hermes_summarization_calendar.concurrency as conc_mod
+        import plugin_api as api_mod  # type: ignore[import-not-found]
+
+        home, _ = test_hermes_home
+        os.environ["LEDGER_ROOT"] = str(tmp_path / "ledger")
+        app = _make_app(home)
+        client = TestClient(app)
+        with conc_mod._lock_registry_lock:
+            conc_mod._locks.clear()
+
+        for _ in range(2):
+            resp = client.post(
+                "/api/plugins/summarization-calendar/recap",
+                params={"date": "2026-03-08"},
+                json={"force_regenerate": True},
+            )
+            assert resp.status_code == 410
+
+        with conc_mod._lock_registry_lock:
+            assert "2026-03-08" not in conc_mod._locks
+        with api_mod._worker_lock:
+            assert "2026-03-08" not in api_mod._worker_pool
+        os.environ.pop("LEDGER_ROOT", None)
+
+    def test_get_recap_read_access_survives(self, test_hermes_home, tmp_path):
+        """Read access for existing recaps is the preserved surface."""
+        home, _ = test_hermes_home
+        ledger = tmp_path / "ledger"
+        os.environ["LEDGER_ROOT"] = str(ledger)
+        app = _make_app(home)
+        client = TestClient(app)
+
+        from hermes_summarization_calendar.recap_storage import save_recap
+        save_recap(
+            "2026-03-08",
+            {
+                "session_summaries": [
+                    {"session_id": "s1", "title": "T", "summary": "S"}
+                ],
+                "overall_recap": "Test",
+            },
+            "fp1",
+            ledger_root=ledger,
+        )
+
+        resp = client.get(
+            "/api/plugins/summarization-calendar/recap?date=2026-03-08"
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["exists"] is True
+
+        versions = client.get(
+            "/api/plugins/summarization-calendar/recap/versions?date=2026-03-08"
+        )
+        assert versions.status_code == 200
+        assert len(versions.json()["versions"]) == 1
+
+        # ...and retirement does not overwrite or delete the stored recap.
+        retired = client.post(
+            "/api/plugins/summarization-calendar/recap",
+            params={"date": "2026-03-08"},
+            json={"force_regenerate": True},
+        )
+        assert retired.status_code == 410
+
+        still = client.get(
+            "/api/plugins/summarization-calendar/recap?date=2026-03-08"
+        )
+        assert still.status_code == 200
+        assert still.json()["exists"] is True
+        os.environ.pop("LEDGER_ROOT", None)

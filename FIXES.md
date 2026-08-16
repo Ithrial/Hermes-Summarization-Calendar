@@ -108,16 +108,52 @@ single boundary redactor for error text that crosses the HTTP boundary:
   pinned behavioral tests with their own placeholder contracts and serve
   storage/log surfaces, not the public response boundary. They stay.
 
-## What was NOT changed (needs Sean's decision — not started)
+## QA finding 3 (Important) — legacy `POST /recap` raw-transcript generation
 
-- **QA finding 3 (Important)** — legacy `POST /recap` still generates
-  raw-transcript recaps, bypassing the summary-only roll-up boundary. QA's
-  recommendation is read-only migration access or a revised spec contract.
-  Decision needed: gate it read-only, or amend the brief.
-- **QA finding 4 (spec deviation)** — session cards lack the brief-required
-  card-level `Generate summary`; current tests assert the control is absent.
-  Decision needed: restore the control, or approve batch-only UX and update
-  the brief.
+**Decision (Sean, 2026-08-16):** retire generation, keep read/management access.
+
+**Problem.** The route was callable by any Dashboard-authorized API caller and
+collected whole-day raw transcripts for model processing, bypassing the
+summary-only roll-up boundary in the project brief. The active frontend does
+not call it (the frontend suite even pins that the bundle never calls the
+retired raw whole-day recap API).
+
+**Fix.** `dashboard/plugin_api.py`:
+
+- `POST /recap` now returns a stable **410** (`recap_generation_retired`)
+  with a fixed message pointing callers at `POST /session-summary/batch`
+  and `POST /rollup`. It has no generation side effects: no slot, no worker,
+  no job, no model call. The request signature (date query + optional
+  `force_regenerate` body) is kept stable so pre-v1.2.4 clients get a clear
+  retirement response instead of a validation error; date validation still
+  runs first (400 semantics preserved).
+- The legacy worker thread (`_run_recap_worker`) and its import of
+  `generate_recap` were removed from the API module. `generate_recap` remains
+  in `recap_orchestrator` (its pinned signature contract is untouched) but is
+  no longer reachable from the HTTP boundary.
+- Preserved unchanged: `GET /recap` (status/staleness), `GET /recap/versions`,
+  `POST /recap/rollback`, month-grid `has_recap`/`recap_stale` flags, and
+  startup stale-lock recovery. Existing stored recaps are never touched.
+
+`PROJECT-BRIEF.md` was amended to record both decisions: the batch-toolbar
+UX (checkboxes + shared toolbar) is the approved generation interface —
+superseding the v1.0 per-card `Generate summary` button, which was removed
+as clunky, with the selection/batch scaffolding kept in preparation for
+aggregate multi-session summarization — and legacy raw recap generation is
+retired with read/management access preserved.
+
+**Test contract changes:** the generation pins (202-queued, per-date 409,
+`recap_already_exists` 400, recap worker-start 500, recap `job_id` PID
+regression) were replaced by retirement regressions (410 fixed message,
+no side effects, stored recap untouched, read access survives). The E12
+pending-worker capacity regression moved from the retired recap path to the
+batch route; the E11 pool-cleanup static pin now targets the surviving
+`pool_key`-keyed routes.
+
+## What was NOT changed (deferred — no exposure, documented)
+
+- **QA finding 4 (spec deviation)** — resolved by brief amendment, not code:
+  the batch-only UX is the approved design (see above).
 - **Scan finding 2 (Medium)** — month inventory re-reads the full cron
   executions table per day (bounded single range query is the fix). Deferred:
   perf hardening, larger blast radius on the month endpoint, no data
@@ -131,9 +167,9 @@ single boundary redactor for error text that crosses the HTTP boundary:
 | Check | Result |
 |---|---|
 | Inverted QA defect repros (`reproductions/test_qa_findings.py`) | 2 passed — both original defects now assert FIXED behavior |
-| New regressions in `tests/` | 6 passed (5-segment near-limit reduction, pre-flight byte rejection, call budget, recap/batch worker-start hygiene, PID-free job_id) |
-| Pinned suites (orchestrator, identity, batch, recap, API, packaging) | all green — small-session single-pass reduction, `segment_count`, fallback ordering, and version contracts preserved |
-| Full release gate (`scripts/run-tests.sh`, Linux, network blocked) | **passed** — backend 478 passed, frontend 172 passed, static validation + release validation for v1.2.4 |
+| New regressions in `tests/` | 6 passed (five near-limit segment summaries, pre-flight byte rejection, call budget, worker-start message hygiene, opaque batch job ID) plus 8 legacy-recap retirement regressions (410 contract, no side effects, stored recap untouched, read access preserved, capacity on batch) |
+| Pinned suites (orchestrator, identity, batch, recap, API, packaging, regression, release-blockers, live-loader) | all green — small-session single-pass reduction, `segment_count`, fallback ordering, version contracts, and the `/recap` loader contract preserved |
+| Full release gate (`scripts/run-tests.sh`, Linux, network blocked) | **passed** — backend 483 passed, frontend 172 passed, static validation + release validation for v1.2.4 |
 | Reproduction run of the original QA commands | `PYTHONPATH="tests:dashboard:scripts" python -m pytest -q -p conftest reproductions/test_qa_findings.py` → 2 passed |
 
 Live gates 4–9 (live Dashboard render, real model call, live SQLite count,

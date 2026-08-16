@@ -29,6 +29,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "dashboard"))
 
 import pytest
 
+from fastapi import HTTPException
+
+import plugin_api as api
+
 # --- Import modules under test ---
 try:
     from hermes_summarization_calendar.recap_storage import (
@@ -660,18 +664,21 @@ class TestWorkerLifecycle:
     """Stale recovery runs before direct POST; thread start failure releases pool entry."""
 
     def test_ensure_startup_called_before_post(self):
-        """post_recap calls _ensure_startup() before worker launch."""
+        """Generation routes call _ensure_startup() before worker launch."""
         api_path = Path(__file__).parent.parent / "dashboard" / "plugin_api.py"
         content = api_path.read_text()
         assert "_ensure_startup()" in content, \
-            "post_recap must call _ensure_startup() before worker launch"
+            "Generation routes must call _ensure_startup() before worker launch"
 
     def test_worker_thread_failure_releases_pool(self):
         """If thread.start() fails, pool entry is removed and slot released."""
         api_path = Path(__file__).parent.parent / "dashboard" / "plugin_api.py"
         content = api_path.read_text()
         assert "worker.start()" in content
-        assert "_worker_pool.pop(date_str, None)" in content, \
+        # v1.2.4: the surviving generation routes (session/roll-up/batch)
+        # clean up by pool key; the legacy recap worker keyed by date was
+        # retired.
+        assert "_worker_pool.pop(pool_key, None)" in content, \
             "Failed start must clean up pool entry"
 
     def test_ensure_startup_is_idempotent(self):
@@ -694,12 +701,85 @@ class TestMaxConcurrency:
         content = api_path.read_text()
         assert "_MAX_CONCURRENCY = 4" in content
 
-    def test_concurrency_check_in_post_recap(self):
+    def test_concurrency_check_in_worker_routes(self):
         api_path = Path(__file__).parent.parent / "dashboard" / "plugin_api.py"
         content = api_path.read_text()
         assert "_MAX_CONCURRENCY" in content
-        assert "too_many_workers" in content
+        # v1.2.4: the capacity 503 lives on the batch/summary/roll-up routes
+        # (the legacy recap generation route that raised "too_many_workers"
+        # was retired).
+        assert "worker_capacity_full" in content
         assert 'status_code=503' in content
+
+    def test_pending_batch_workers_count_toward_global_limit(
+        self, monkeypatch, tmp_path
+    ):
+        """E12 runtime contract, v1.2.4: pending (not-yet-started) workers
+        reserve capacity before their next request can be accepted.
+
+        Legacy recap generation was retired, so the batch route carries the
+        regression: each request creates a durable job plus one pending
+        coordinator thread; the request beyond the pool must 503.
+        """
+        import hermes_summarization_calendar.concurrency as concurrency
+        from hermes_summarization_calendar.contract import DailySession
+        from types import SimpleNamespace
+
+        class PendingThread:
+            def __init__(self, *args, **kwargs):
+                self.started = False
+            def start(self):
+                self.started = True
+            def is_alive(self):
+                return False
+
+        api._worker_pool.clear()
+        monkeypatch.setattr(api, "_ensure_startup", lambda: None)
+        monkeypatch.setattr(api, "get_ledger_root", lambda: tmp_path)
+        monkeypatch.setattr(
+            api,
+            "_build_day_inventory_safe",
+            lambda date_str, ledger_root: SimpleNamespace(
+                sessions=[
+                    DailySession(
+                        session_id="20260811_100000_bbb",
+                        profile="default",
+                        source="cli",
+                        model="model",
+                        title="Session",
+                        message_count=1,
+                        tool_call_count=0,
+                    )
+                ]
+            ),
+        )
+        monkeypatch.setattr(
+            concurrency, "release_generation_slot", lambda *a, **k: None
+        )
+        monkeypatch.setattr(api.threading, "Thread", PendingThread)
+
+        try:
+            for day in range(1, 5):
+                api.post_batch_summary(
+                    f"2026-08-{day:02d}",
+                    api.BatchRequestBody(
+                        sessions=[
+                            {"profile": "default", "session_id": "20260811_100000_bbb"}
+                        ]
+                    ),
+                )
+            with pytest.raises(HTTPException) as exc:
+                api.post_batch_summary(
+                    "2026-08-05",
+                    api.BatchRequestBody(
+                        sessions=[
+                            {"profile": "default", "session_id": "20260811_100000_bbb"}
+                        ]
+                    ),
+                )
+            assert exc.value.status_code == 503
+        finally:
+            api._worker_pool.clear()
 
 
 # ====================================================================
