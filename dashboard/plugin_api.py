@@ -979,8 +979,19 @@ def _run_batch_worker(
     """Worker thread for batch summary generation."""
     try:
         result = run_batch_summary(date, batch_id, ledger_root=ledger_root)
-        if result.get("status") not in {"completed", "partial"}:
-            logger.error("Batch summary failed for %s: %s", pool_key, result.get("error", "unknown"))
+        status = result.get("status")
+        if status not in {"completed", "partial"}:
+            error = result.get("error")
+            if not error and status == "failed":
+                failed = result.get("failed")
+                error = (
+                    f"{failed} member(s) failed"
+                    if isinstance(failed, int)
+                    else "batch returned failed status"
+                )
+            if not error:
+                error = f"batch returned status {status or 'missing status'}"
+            logger.error("Batch summary failed for %s: %s", pool_key, error)
     except Exception as exc:
         logger.exception("Unexpected batch worker failure for %s: %s", pool_key, exc)
         # Best-effort terminalize on unexpected error

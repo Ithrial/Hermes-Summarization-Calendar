@@ -6,7 +6,7 @@ A standalone Hermes Web Dashboard plugin that adds a Calendar page for browsing 
 
 Summarization Calendar does not patch Hermes core. It inventories Hermes session and cron stores read-only and writes its own versioned artifacts under the active `HERMES_HOME`.
 
-## v1.1 behavior
+## Current behavior
 
 - Calendar month navigation with activity counts.
 - Daily session inventory across the default Hermes profile and named profiles.
@@ -41,6 +41,13 @@ $HERMES_HOME/plugins/summarization-calendar/dashboard/manifest.json
 For this standalone Dashboard extension, `dashboard/manifest.json` is the canonical package manifest. A root `plugin.yaml` or `plugin.json` is not required by the Dashboard plugin contract.
 
 `HERMES_HOME` defaults to `~/.hermes`.
+
+The Dashboard loader enables a user-installed standalone extension by the
+exact manifest name. Ensure the active Hermes config contains a YAML list entry
+for `summarization-calendar` under `plugins.enabled`; the directory name may be
+different. This is separate from the native `hermes plugins enable` command,
+which does not manage Dashboard-only packages that have no root
+`plugin.yaml`/`plugin.json`.
 
 ### From a release archive
 
@@ -111,7 +118,8 @@ Runtime code:
 $HERMES_HOME/plugins/summarization-calendar/
 ```
 
-Generated data:
+Generated data follows the active `HERMES_HOME` at runtime (or the explicit
+`LEDGER_ROOT` override used by tests and controlled deployments):
 
 ```text
 $HERMES_HOME/summarization-calendar/

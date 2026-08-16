@@ -2,6 +2,17 @@
 
 All notable changes to Hermes Summarization Calendar are documented here.
 
+## 1.2.1 — 2026-08-16
+
+### Fixed
+- Made batch finalization idempotent so a coordinator retry or concurrent finalizer returns immutable terminal state instead of surfacing a misleading failure.
+- Replaced the batch worker's `None`/`unknown` failure diagnostic with the failed-member count for normal all-failed batches.
+- Resolved generated ledger roots from the active `HERMES_HOME` at runtime while preserving the explicit `LEDGER_ROOT` override and legacy `daily-ledger` fallback.
+
+### Documentation
+- Clarified that `AGENTS.md` restrictions apply to automated workers, not maintainer-directed installation, rollback, restart, or publication.
+- Documented the exact `plugins.enabled` manifest-name requirement for standalone Dashboard extensions.
+
 ## 1.2.0 — 2026-08-15
 
 ### Changed

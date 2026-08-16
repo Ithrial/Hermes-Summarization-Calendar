@@ -31,10 +31,27 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Default ledger root — override via LEDGER_ROOT env in tests.
+# Default ledger roots. The constants preserve a convenient test seam when
+# HERMES_HOME is unset; configured Hermes homes are resolved dynamically below.
 DEFAULT_LEDGER_ROOT = Path.home() / ".hermes" / "summarization-calendar"
 # Legacy root used by v1.1.0-and-earlier installs.
 LEGACY_LEDGER_ROOT = Path.home() / ".hermes" / "daily-ledger"
+
+
+def _configured_ledger_roots() -> tuple[Path, Path]:
+    """Return new and legacy roots under the active Hermes home.
+
+    ``HERMES_HOME`` is process configuration, not the user's shell home. It
+    must therefore be resolved at call time rather than captured at import,
+    because the Dashboard and isolated test instances may select it after
+    importing the plugin package.
+    """
+    hermes_home = os.environ.get("HERMES_HOME")
+    if hermes_home:
+        home = Path(hermes_home).expanduser()
+        return home / "summarization-calendar", home / "daily-ledger"
+    return DEFAULT_LEDGER_ROOT, LEGACY_LEDGER_ROOT
+
 
 # Subdirectories that hold stored data. A root containing only an empty
 # scaffold (created by _ensure_dirs) does NOT count as "having data".
@@ -81,11 +98,11 @@ def get_ledger_root() -> Path:
     env_val = os.environ.get("LEDGER_ROOT")
     if env_val:
         return Path(env_val).expanduser().resolve()
-    new_root = DEFAULT_LEDGER_ROOT
+    new_root, legacy_root = _configured_ledger_roots()
     if _root_has_data(new_root):
         return new_root.resolve()
-    if _root_has_data(LEGACY_LEDGER_ROOT):
-        return LEGACY_LEDGER_ROOT.resolve()
+    if _root_has_data(legacy_root):
+        return legacy_root.resolve()
     return new_root.resolve()
 
 

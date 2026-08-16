@@ -390,7 +390,14 @@ def test_finalize_batch_job_failed_status(tmp_path: Path) -> None:
     assert finalized["status"] == "failed"
 
 
-def test_finalized_batch_rejects_further_updates(tmp_path: Path) -> None:
+def test_finalized_batch_finalize_is_idempotent_noop(tmp_path: Path) -> None:
+    """v1.2.1: finalizing an already-finalized batch is a no-op, not an error.
+
+    Live race (testbed errors.log 18:05:38): the orchestrator's finally-block
+    finalize and a concurrent finalization both landed; the second raised
+    'already finalized', was caught, and surfaced as 'summary failed: unknown'.
+    A batch already in a terminal state must simply be returned as-is.
+    """
     root = tmp_path / "ledger"
     members = make_members(2)
     batch_jobs.create_batch_job(root, DATE, BATCH_ID, members)
@@ -403,10 +410,24 @@ def test_finalized_batch_rejects_further_updates(tmp_path: Path) -> None:
             "completed",
             version_id=f"ver-{i}"
         )
-    batch_jobs.finalize_batch_job(root, DATE, BATCH_ID)
+    first = batch_jobs.finalize_batch_job(root, DATE, BATCH_ID)
+    assert first["status"] == "completed"
+    finished_at = first["finished_at"]
 
-    with pytest.raises(ValueError, match="already finalized"):
-        batch_jobs.finalize_batch_job(root, DATE, BATCH_ID)
+    # Second finalize (the double-finalize race): no raise, same terminal state,
+    # counts and timestamp untouched.
+    second = batch_jobs.finalize_batch_job(root, DATE, BATCH_ID)
+    assert second["status"] == "completed"
+    assert second["finished_at"] == finished_at
+    assert second["completed"] == 2
+    assert second["failed"] == 0
+    assert second["skipped"] == 0
+    assert second["current"] is None
+
+    # On-disk state is byte-stable across the no-op finalize.
+    on_disk = batch_jobs.load_batch_job(root, DATE, BATCH_ID)
+    assert on_disk["status"] == "completed"
+    assert on_disk["finished_at"] == finished_at
 
 
 # ---------------------------------------------------------------------

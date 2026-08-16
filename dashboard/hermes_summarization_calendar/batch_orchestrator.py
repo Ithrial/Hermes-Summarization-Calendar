@@ -151,7 +151,8 @@ def run_batch_summary(
     Raises
     ------
     ValueError
-        If the batch is missing, wrong date, or already finalized.
+        If the batch is missing or has the wrong date. A terminal batch is
+        returned unchanged so a repeated coordinator call is idempotent.
     """
     # Resolve injectable defaults
     if build_inventory is None:
@@ -176,7 +177,9 @@ def run_batch_summary(
     if batch_job is None:
         raise ValueError(f"batch job {batch_id} not found for {date}")
     if batch_job["status"] in {"completed", "partial", "failed"}:
-        raise ValueError(f"batch job {batch_id} is already finalized")
+        # A retry after another coordinator finalized the batch is a safe
+        # read-only no-op. Do not re-run members or manufacture a failure.
+        return batch_job
 
     try:
         started = start_batch_job(ledger_root, date, batch_id)

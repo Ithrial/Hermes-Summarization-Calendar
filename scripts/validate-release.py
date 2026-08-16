@@ -79,7 +79,10 @@ def tracked_files() -> list[str]:
         return [
             str(path.relative_to(ROOT))
             for path in ROOT.rglob("*")
-            if path.is_file() and ".git" not in path.parts
+            if path.is_file()
+            and ".git" not in path.parts
+            and "__pycache__" not in path.parts
+            and path.suffix != ".pyc"
         ]
     return [line for line in result.stdout.splitlines() if line]
 
