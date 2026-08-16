@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 import time
 from dataclasses import dataclass, field
@@ -48,8 +49,21 @@ def get_ledger_running_dir(ledger_root: Path | None = None) -> Path:
 
     root = ledger_root or get_ledger_root()
     running_dir = root / "running"
-    running_dir.mkdir(parents=True, exist_ok=True)
+    running_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    # Enforce owner-only mode on existing directories created under older
+    # versions that relied on process umask (scan finding: permissive umask).
+    try:
+        os.chmod(running_dir, 0o700)
+    except OSError:
+        pass
     return running_dir
+
+
+def _write_private(path: Path, content: str) -> None:
+    """Write text to ``path`` with owner-only permissions (0600)."""
+    fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(content)
 
 
 def save_status(status: RecapJobStatus, ledger_root: Path | None = None) -> None:
@@ -66,15 +80,20 @@ def save_status(status: RecapJobStatus, ledger_root: Path | None = None) -> None
         "version_id": status.version_id,
     }
 
-    # Atomic write
+    # Atomic write (owner-only: status files are API-visible job state)
     tmp = status_path.with_suffix(".tmp")
     content = json.dumps(data, indent=2)
-    tmp.write_text(content, encoding="utf-8")
+    _write_private(tmp, content)
     try:
+        os.chmod(tmp, 0o600)
         tmp.replace(status_path)
     except OSError:
         # Fallback to direct write if atomic fails
-        status_path.write_text(content, encoding="utf-8")
+        _write_private(status_path, content)
+        try:
+            os.chmod(status_path, 0o600)
+        except OSError:
+            pass
 
 
 def load_status(date: str, ledger_root: Path | None = None) -> RecapJobStatus | None:
@@ -232,17 +251,13 @@ def fail_generation(
 
 
 def _sanitize_error(raw: str) -> str:
-    """Remove sensitive info from error text for durable storage."""
-    import re as _re
-    if not raw:
-        return ""
-    sanitized = raw.strip()[:500]
-    # Remove PIDs
-    sanitized = _re.sub(r"\bpid[_\s]?=?\s*\d+", "[PID]", sanitized, flags=_re.I)
-    # Remove ALL absolute Unix paths (/home, /var, /tmp, /opt, /mnt, /root, /usr, /etc)
-    sanitized = _re.sub(
-        r"/(?:home|var|tmp|opt|mnt|root|usr|etc)[\w./-]+", "[PATH]", sanitized
-    )
-    # Remove potential tokens/secrets
-    sanitized = _re.sub(r"\b[0-9a-f]{32,}\b", "[REDACTED]", sanitized)
-    return sanitized
+    """Remove sensitive info from error text for durable storage.
+
+    Delegates to the shared boundary redactor (``error_policy.redact_error``)
+    so job-state errors carry the full redaction contract: Linux and macOS
+    paths, credential-bearing URLs, bearer and keyed tokens, PIDs, and long
+    opaque secrets.
+    """
+    from .error_policy import redact_error
+
+    return redact_error(raw, max_chars=500)

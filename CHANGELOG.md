@@ -2,6 +2,21 @@
 
 All notable changes to Hermes Summarization Calendar are documented here.
 
+## 1.2.4 — 2026-08-16
+
+### Security
+- Replaced raw exception text in public worker-start error responses (batch and legacy recap routes) with fixed messages; full diagnostics are server-side logs only (QA finding 2).
+- Stopped embedding the Dashboard process ID in public recap job identifiers; queue responses now return an opaque random identifier (scan finding 3, CWE-200).
+- Added a shared boundary redactor (`error_policy`) for API-visible job error text, covering Linux and macOS paths, bearer and keyed credentials, credential-bearing URLs, PIDs, and long opaque secrets; all job-state errors are stored redacted (scan finding 6).
+- Created recap status directories and files with explicit owner-only permissions (0700/0600) instead of relying on the process umask (scan finding 5, CWE-276).
+
+### Fixed
+- Oversized session summaries no longer fail during multi-chunk reduction: segment summaries are now reduced hierarchically (packed into prompt-sized groups, reduced level by level), so sessions with five or more near-limit segment summaries complete instead of failing (QA finding 1).
+- Added cumulative per-job budgets: transcripts above the maximum source byte budget are rejected before the first provider call, and jobs exceeding the maximum provider call count are stopped with a stable error (scan finding 1, CWE-770).
+
+### Verification
+- 478 backend tests pass, including six new regressions (five near-limit segment summaries, pre-flight byte rejection, call budget, worker-start message hygiene, and PID-free job IDs); frontend suite 172 pass; full release gate passes for v1.2.4 without external network access.
+
 ## 1.2.3 — 2026-08-16
 
 ### Documentation

@@ -50,7 +50,7 @@ class TestHealthEndpoint:
         data = resp.json()
         assert data["status"] == "ok"
         assert data["plugin_name"] == "summarization-calendar"
-        assert data["version"] == "1.2.3"
+        assert data["version"] == "1.2.4"
         assert data["profiles_discovered"] == 2
         assert data["readable_sources"] == 2
         assert data["cron_readable"] is True
@@ -244,3 +244,122 @@ class TestDayEndpoint:
         data = resp.json()
         assert data["chicago_midnight_utc"] == "2026-11-01T05:00:00Z"
         assert data["chicago_next_midnight_utc"] == "2026-11-02T06:00:00Z"
+
+
+class TestWorkerStartErrorHygiene:
+    """v1.2.4 regression: worker-start failures must not leak internals.
+
+    QA finding 2 and scan finding 6: raw exception text (filesystem paths,
+    credential-like values) must never reach the public 500 response, and
+    public job identifiers must not embed the Dashboard process ID
+    (scan finding 3).
+    """
+
+    @pytest.fixture(autouse=True)
+    def _clean_worker_pool(self):
+        import plugin_api as api_mod  # type: ignore[import-not-found]
+
+        with api_mod._worker_lock:
+            api_mod._worker_pool.clear()
+        yield
+        with api_mod._worker_lock:
+            api_mod._worker_pool.clear()
+
+    @staticmethod
+    def _failing_thread_factory():
+        class FailingThread:
+            def __init__(self, **_kwargs):
+                pass
+
+            def start(self):
+                raise RuntimeError(
+                    "failed at /private/secret/path token_live_abcdef"
+                )
+
+            def is_alive(self):
+                return False
+
+        return FailingThread
+
+    def test_recap_worker_start_failure_has_fixed_message(self, test_hermes_home, monkeypatch):
+        home, _ = test_hermes_home
+        app = _make_app(home)
+        import plugin_api as api_mod  # type: ignore[import-not-found]
+
+        monkeypatch.setattr(api_mod.threading, "Thread", self._failing_thread_factory())
+        with api_mod._worker_lock:
+            api_mod._worker_pool.clear()
+
+        client = TestClient(app)
+        resp = client.post(
+            "/api/plugins/summarization-calendar/recap",
+            params={"date": "2026-03-08"},
+            json={"force_regenerate": True},
+        )
+
+        assert resp.status_code == 500
+        detail = resp.json()["detail"]
+        assert detail["error"] == "worker_start_failed"
+        body = resp.text
+        assert "/private/secret/path" not in body
+        assert "token_live_abcdef" not in body
+        assert "RuntimeError" not in body
+        # Fixed public message, date included, no exception text
+        assert "2026-03-08" in detail["message"]
+        assert "Try again shortly" in detail["message"]
+
+    def test_recap_job_id_does_not_disclose_pid(self, test_hermes_home, monkeypatch):
+        home, _ = test_hermes_home
+        app = _make_app(home)
+        client = TestClient(app)
+
+        resp = client.post(
+            "/api/plugins/summarization-calendar/recap",
+            params={"date": "2026-03-08"},
+            json={"force_regenerate": True},
+        )
+
+        assert resp.status_code == 202
+        job_id = resp.json()["job_id"]
+        # Opaque random suffix: 16 hex chars, never the process ID
+        suffix = job_id.rsplit("-", 1)[-1]
+        assert len(suffix) == 16
+        int(suffix, 16)
+        assert str(os.getpid()) not in job_id
+
+    def test_batch_worker_start_failure_has_fixed_message(self, test_hermes_home, monkeypatch):
+        home, _ = test_hermes_home
+        app = _make_app(home)
+        import plugin_api as api_mod  # type: ignore[import-not-found]
+        from hermes_summarization_calendar.inventory import discover_all  # type: ignore[import-not-found]
+
+        # Find a real session identity in the fixture day so batch
+        # validation passes and the worker-start path is reached.
+        profiles, cron_roots = discover_all(home)
+        sessions = api_mod.build_day_inventory("2026-03-08", profiles, cron_roots).sessions
+        assert sessions, "fixture day must contain sessions"
+        first = sessions[0]
+
+        monkeypatch.setattr(api_mod.threading, "Thread", self._failing_thread_factory())
+        with api_mod._worker_lock:
+            api_mod._worker_pool.clear()
+
+        client = TestClient(app)
+        resp = client.post(
+            "/api/plugins/summarization-calendar/session-summary/batch",
+            params={"date": "2026-03-08"},
+            json={
+                "sessions": [
+                    {"profile": first.profile, "session_id": first.session_id}
+                ],
+                "regenerate_current": False,
+            },
+        )
+
+        assert resp.status_code == 500
+        detail = resp.json()["detail"]
+        assert detail["error"] == "worker_start_failed"
+        body = resp.text
+        assert "/private/secret/path" not in body
+        assert "token_live_abcdef" not in body
+        assert "Try again shortly" in detail["message"]

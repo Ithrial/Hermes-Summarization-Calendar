@@ -239,6 +239,142 @@ def test_invalid_reduction_falls_back_to_ordered_validated_segments(
     assert f"Part {segment_number}" in raw["summary"]
 
 
+# ---------------------------------------------------------------------------
+# v1.2.4 regressions: bounded hierarchical reduction + cumulative job budget
+# (QA finding 1; security scan finding 1, CWE-770)
+# ---------------------------------------------------------------------------
+
+
+def test_five_near_limit_segment_summaries_reduce_successfully(
+    test_hermes_home, tmp_path: Path
+) -> None:
+    """QA finding 1 regression: five near-limit (12,000-char) valid segment
+    summaries must NOT fail with 'Reduction prompt exceeds size limit'.
+
+    The old single-pass reduction required all five summaries in ONE prompt
+    (~60 KiB > 48 KiB ceiling) and failed the job. Hierarchical reduction
+    packs summaries into prompt-sized groups and reduces level by level, so
+    the same session now completes.
+    """
+    home, _ = test_hermes_home
+    conn = sqlite3.connect(str(home / "state.db"))
+    # ~260 KiB of content at the default 48 KiB ceiling -> 5+ chunks
+    conn.execute(
+        "UPDATE messages SET content = ? WHERE session_id = ?",
+        (("segment-content-" + "x" * 40_000) * 6 + "y" * 20_000, SESSION_ID),
+    )
+    conn.commit()
+    conn.close()
+    profiles, cron_roots = discover_all(home)
+    calls = 0
+    reduction_calls = 0
+    near_limit = "S" * 12_000  # at the validation cap, like real segment output
+
+    def runner(*, prompt: str, **_kwargs) -> AuxiliaryResult:
+        nonlocal calls, reduction_calls
+        calls += 1
+        if "SEGMENT_SUMMARIES_FOR_REDUCTION" in prompt:
+            reduction_calls += 1
+            return _aux_result(f"Reduced level-{reduction_calls} summary.")
+        return _aux_result(near_limit)
+
+    status = generate_session_summary(
+        DATE,
+        PROFILE,
+        SESSION_ID,
+        profiles=profiles,
+        cron_roots=cron_roots,
+        runner=runner,
+        ledger_root=tmp_path / "ledger",
+    )
+
+    assert status.status == "completed", status.error
+    # Multiple chunks, and the old failure mode is gone
+    assert calls >= 6
+    assert reduction_calls >= 2
+    assert "Reduction prompt exceeds size limit" not in (status.error or "")
+    raw, _ = load_session_summary(DATE, PROFILE, SESSION_ID, tmp_path / "ledger")
+    assert raw is not None
+    # Every chunk summary counted; final summary came from the last reduction
+    assert raw["generation_method"] == "reduced"
+    assert raw["segment_count"] == calls - reduction_calls
+
+
+def test_oversized_session_rejected_before_first_provider_call(
+    test_hermes_home, tmp_path: Path
+) -> None:
+    """Scan finding 1 test: a transcript just over the cumulative byte budget
+    is rejected with a stable error BEFORE any provider call."""
+    home, _ = test_hermes_home
+    conn = sqlite3.connect(str(home / "state.db"))
+    conn.execute(
+        "UPDATE messages SET content = ? WHERE session_id = ?",
+        ("z" * (3 * 1024 * 1024), SESSION_ID),  # 3 MiB > 2 MiB budget
+    )
+    conn.commit()
+    conn.close()
+    profiles, cron_roots = discover_all(home)
+    calls = 0
+
+    def runner(*, prompt: str, **_kwargs) -> AuxiliaryResult:
+        nonlocal calls
+        calls += 1
+        return _aux_result()
+
+    status = generate_session_summary(
+        DATE,
+        PROFILE,
+        SESSION_ID,
+        profiles=profiles,
+        cron_roots=cron_roots,
+        runner=runner,
+        ledger_root=tmp_path / "ledger",
+    )
+
+    assert status.status == "failed"
+    assert calls == 0, "byte budget must reject before any provider call"
+    assert "exceeds maximum job size" in (status.error or "")
+
+
+def test_provider_call_budget_stops_overlong_jobs(
+    test_hermes_home, tmp_path: Path
+) -> None:
+    """Scan finding 1 test: a multi-chunk job stops when its call budget is
+    exhausted, with a stable error."""
+    home, _ = test_hermes_home
+    conn = sqlite3.connect(str(home / "state.db"))
+    # ~20 KiB at a 4,500-byte ceiling -> 5+ chunks, more than the 3-call budget
+    conn.execute(
+        "UPDATE messages SET content = ? WHERE session_id = ?",
+        ("w" * 20_000, SESSION_ID),
+    )
+    conn.commit()
+    conn.close()
+    profiles, cron_roots = discover_all(home)
+    calls = 0
+
+    def runner(*, prompt: str, **_kwargs) -> AuxiliaryResult:
+        nonlocal calls
+        calls += 1
+        return _aux_result()
+
+    status = generate_session_summary(
+        DATE,
+        PROFILE,
+        SESSION_ID,
+        profiles=profiles,
+        cron_roots=cron_roots,
+        runner=runner,
+        safe_ceiling=4500,
+        max_provider_calls=3,
+        ledger_root=tmp_path / "ledger",
+    )
+
+    assert status.status == "failed"
+    assert calls == 3, "budget allows exactly max_provider_calls"
+    assert "maximum number of provider calls" in (status.error or "")
+
+
 def test_source_change_during_generation_fails_before_publish(
     test_hermes_home, tmp_path: Path
 ) -> None:

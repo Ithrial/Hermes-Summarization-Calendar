@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import importlib.util
 import logging
-import os
 import re
 import secrets
 import sys
@@ -593,6 +592,10 @@ def post_recap(
         worker.start()
     except (RuntimeError, OSError) as exc:
         # Thread failed to start — remove pool entry and release durable slot
+        # Full diagnostics go to the server log only: raw exception text can
+        # carry filesystem paths, process IDs, or credential-like values and
+        # must never cross the HTTP response boundary.
+        logger.exception("Recap worker thread start failed for %s", date_str)
         with _worker_lock:
             if _worker_pool.get(date_str) is worker:
                 _worker_pool.pop(date_str, None)
@@ -605,11 +608,13 @@ def post_recap(
             status_code=500,
             detail={
                 "error": "worker_start_failed",
-                "message": f"Failed to start recap worker for {date_str}: {exc}",
+                "message": f"Failed to start recap worker for {date_str}. Try again shortly.",
             },
         )
 
-    job_id = f"recap-{date_str}-{os.getpid()}"
+    # Opaque random identifier: the process ID must not cross the API
+    # boundary (no host/process metadata in public responses).
+    job_id = f"recap-{date_str}-{secrets.token_hex(8)}"
 
     return {
         "status": "queued",
@@ -1218,11 +1223,13 @@ def post_batch_summary(
         except Exception:
             pass
 
+        # Fixed public message; full diagnostics are server-side only.
+        logger.exception("Batch worker thread start failed for %s batch %s", date_str, batch_id)
         raise HTTPException(
             status_code=500,
             detail={
                 "error": "worker_start_failed",
-                "message": f"Failed to start batch worker: {exc}",
+                "message": "Failed to start batch worker. Try again shortly.",
             },
         )
 
