@@ -1,5 +1,14 @@
 # Worker Instructions
 
+## Scope
+
+These instructions govern automated coding workers operating in this repository.
+They do not prohibit the repository maintainer/operator from installing,
+activating, restarting, rolling back, or publishing the plugin. Those are
+operator-owned actions when Sean explicitly directs them. The worker boundary
+below remains in force for unattended workers: they must not perform live
+installation, service restart, rollback, or publication on their own.
+
 - Read `PROJECT-BRIEF.md` before making changes.
 - This is a standalone Hermes Web Dashboard plugin; do not modify the Hermes Agent core checkout.
 - Treat the Hermes Agent installation as a read-only runtime dependency and reference source.

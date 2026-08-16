@@ -692,6 +692,7 @@ class TestRecapStorage:
         legacy_root = tmp_path / "daily-ledger"
         monkeypatch.setattr(storage, "DEFAULT_LEDGER_ROOT", new_root)
         monkeypatch.setattr(storage, "LEGACY_LEDGER_ROOT", legacy_root)
+        monkeypatch.delenv("HERMES_HOME", raising=False)
         monkeypatch.delenv("LEDGER_ROOT", raising=False)
         return new_root, legacy_root
 
@@ -728,6 +729,23 @@ class TestRecapStorage:
         (new_root / "recaps").mkdir(parents=True)
         (legacy_root / "recaps").mkdir(parents=True)
         assert storage.get_ledger_root() == new_root.resolve()
+
+    def test_root_honors_hermes_home(self, tmp_path, monkeypatch):
+        """The default ledger roots follow the active Hermes installation home."""
+        import hermes_summarization_calendar.recap_storage as storage
+
+        hermes_home = tmp_path / "isolated-hermes"
+        monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+        monkeypatch.delenv("LEDGER_ROOT", raising=False)
+
+        expected = hermes_home / "summarization-calendar"
+        assert storage.get_ledger_root() == expected.resolve()
+
+        # A pre-rename store under the same HERMES_HOME is still followed.
+        legacy = hermes_home / "daily-ledger" / "recaps" / "2026-03-08"
+        legacy.mkdir(parents=True)
+        (legacy / "meta.json").write_text("{}", encoding="utf-8")
+        assert storage.get_ledger_root() == (hermes_home / "daily-ledger").resolve()
 
     def test_env_override_wins_over_data_detection(self, root_paths, tmp_path, monkeypatch):
         import hermes_summarization_calendar.recap_storage as storage

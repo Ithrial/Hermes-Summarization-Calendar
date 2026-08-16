@@ -107,6 +107,26 @@ class TestBatchOrchestrator:
     def setup_method(self) -> None:
         _reset_for_tests()
 
+    def test_terminal_batch_retry_is_idempotent_noop(self, tmp_path: Path) -> None:
+        """A repeated coordinator call returns terminal state without rerunning work."""
+        from hermes_summarization_calendar.batch_orchestrator import run_batch_summary
+
+        root = tmp_path / "ledger"
+        date, bid = "2026-03-10", "terminal-retry"
+        members = _make_members(1)
+        _create_batch(root, date, bid, members)
+        batch_jobs.start_batch_job(root, date, bid)
+        batch_jobs.update_batch_member(
+            root, date, bid, "p0", "s0", "completed", version_id="ver-0"
+        )
+        finalized = batch_jobs.finalize_batch_job(root, date, bid)
+
+        result = run_batch_summary(date, bid, ledger_root=root)
+
+        assert result == finalized
+        assert result["status"] == "completed"
+        assert result["finished_at"] == finalized["finished_at"]
+
     # -- strict order & single-generation-at-a-time -------------------------
 
     def test_strict_stored_order_and_one_at_a_time(self, tmp_path: Path) -> None:

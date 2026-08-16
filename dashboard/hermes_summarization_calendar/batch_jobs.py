@@ -570,7 +570,8 @@ def finalize_batch_job(
     Raises
     ------
     ValueError
-        If batch not found, already finalized, or members are still active.
+        If batch not found or members are still active. A terminal batch is
+        returned unchanged so concurrent finalization is idempotent.
     """
     with _batch_lock(ledger_root, f"{date_str}:{batch_id}"):
         batch_job = load_batch_job(ledger_root, date_str, batch_id)
@@ -578,7 +579,10 @@ def finalize_batch_job(
             raise ValueError(f"batch job {batch_id} not found for {date_str}")
 
         if batch_job["status"] in {"completed", "partial", "failed"}:
-            raise ValueError(f"batch job {batch_id} is already finalized")
+            # Finalization may race with the coordinator's own finally block.
+            # Terminal state is immutable; return it rather than turning a
+            # successful batch into a misleading worker error.
+            return batch_job
 
         # Refuse to finalize while any member is queued/running
         active = [m for m in batch_job["members"] if m["status"] in ("queued", "running")]
